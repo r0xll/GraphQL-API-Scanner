@@ -8,8 +8,8 @@ import java.awt.Component
 import javax.swing.JMenuItem
 
 /**
- * Right-click action to send the selected request to the GraphQL Analyzer tab
- * and (optionally) run the checks immediately.
+ * Right-click action to send the selected request to the GraphQL Analyzer as a new
+ * target tab. Each invocation opens its own tab, so multiple requests are retained.
  */
 class GraphQLContextMenu(
     private val api: MontoyaApi,
@@ -21,15 +21,9 @@ class GraphQLContextMenu(
         val request = target.request() ?: return emptyList()
 
         val sendItem = JMenuItem("Send to GraphQL Analyzer").apply {
-            addActionListener { tab.setBaseRequest(request) }
+            addActionListener { tab.addTarget(request) }
         }
-        val runItem = JMenuItem("Send to GraphQL Analyzer & run OWASP checks").apply {
-            addActionListener {
-                tab.setBaseRequest(request)
-                tab.runChecks()
-            }
-        }
-        return listOf(sendItem, runItem)
+        return listOf(sendItem)
     }
 
     private fun selectedRequestResponse(event: ContextMenuEvent): HttpRequestResponse? {

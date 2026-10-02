@@ -32,12 +32,22 @@ On load the Output tab logs:
    endpoint. Fingerprints on path (`/(graphql|graphiql|playground|altair)`),
    request body (top-level `query`/`mutation`/`operationName`), or `data`+`errors`
    response shape.
-2. **Run checks** — right-click a GraphQL request →
-   *Send to GraphQL Analyzer & run OWASP checks*, or use the tab's **Run OWASP
-   checks** button. The tab shows the introspected (or reconstructed) schema tree
-   and a findings grid; each finding is added to Burp's site map as an
-   `AuditIssue` with request/response evidence.
-3. **Two-identity checks (BOLA/BFLA)** — supply two identities in the tab's config
+2. **Open a target tab** — right-click a GraphQL request → *Send to GraphQL
+   Analyzer*. Each request you send becomes its own **closable, Repeater-style
+   tab**, so multiple targets are retained side by side (not overwritten).
+3. **Enumerate** — in the target tab, click **Enumerate**: the extension confirms
+   introspection, fetches (or reconstructs) the schema into the tree, runs the
+   endpoint-level OWASP checks, and lists every root operation in the
+   **Operations** grid.
+4. **Crawl & scan per operation** — the Operations grid is Burp-API-scan-style:
+   tick the operations to actively test (queries are pre-selected; **mutations and
+   subscriptions are off by default** — ticking them is the write-safety gate),
+   then click **Scan selected**. Each selected operation is probed individually; its
+   status (RESOLVED / DENIED / EMPTY / ERROR) and per-operation findings appear in
+   the grid, and every finding is added to Burp's site map as an `AuditIssue` with
+   evidence. Per-operation findings cover BOLA (API1), BFLA (API5), sensitive-field
+   exposure (API3), and verbose errors (API8), tagged `url#QUERY.fieldName`.
+5. **Two-identity checks (BOLA/BFLA)** — supply two identities in the tab's config
    (one `Header: value` per line) and, for a firm BOLA proof, a known object id
    owned by identity A. These checks are skipped unless configured — no creds are
    ever hardcoded.

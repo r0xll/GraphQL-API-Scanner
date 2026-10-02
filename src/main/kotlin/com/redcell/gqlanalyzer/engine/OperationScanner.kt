@@ -1,0 +1,185 @@
+package com.redcell.gqlanalyzer.engine
+
+import burp.api.montoya.http.message.HttpRequestResponse
+import com.redcell.gqlanalyzer.checks.Heuristics
+import com.redcell.gqlanalyzer.checks.impl.BflaCheck
+import com.redcell.gqlanalyzer.checks.impl.BolaCheck
+import com.redcell.gqlanalyzer.checks.impl.FieldAuthzCheck
+import com.redcell.gqlanalyzer.model.CheckContext
+import com.redcell.gqlanalyzer.model.Confidence
+import com.redcell.gqlanalyzer.model.Finding
+import com.redcell.gqlanalyzer.model.Operation
+import com.redcell.gqlanalyzer.model.OperationStatus
+import com.redcell.gqlanalyzer.model.Severity
+import com.redcell.gqlanalyzer.schema.SchemaModel
+import com.redcell.gqlanalyzer.transport.GraphQLHttp
+import com.redcell.gqlanalyzer.transport.GraphQLResponses
+import com.redcell.gqlanalyzer.transport.QueryBuilder
+
+/**
+ * Crawls the selected operations like a Burp API scan: one primary probe per
+ * operation (plus one extra for a two-identity BOLA comparison), classifying each
+ * and emitting per-operation findings. Mutations/subscriptions reach here only
+ * because the operator selected them — selection is the write-safety gate.
+ */
+class OperationScanner {
+
+    data class ScanResult(
+        val statuses: Map<Operation, OperationStatus>,
+        val findings: List<Finding>,
+    )
+
+    fun scan(ctx: CheckContext, operations: List<Operation>): ScanResult {
+        val schema = ctx.schema
+        val baseUrl = runCatching { ctx.request.url() }.getOrNull().orEmpty()
+        val statuses = LinkedHashMap<Operation, OperationStatus>()
+        val findings = mutableListOf<Finding>()
+
+        for (op in operations) {
+            val loc = if (baseUrl.isEmpty()) op.name else "$baseUrl#${op.name}"
+            val sensitive = if (schema != null) sensitiveLeaves(schema, op) else emptyList()
+            val doc = buildDoc(schema, op, sensitive)
+
+            val rr = GraphQLHttp.postJson(ctx.api, ctx.request, GraphQLHttp.queryEnvelope(doc), ctx.config.authHeadersA)
+            val body = rr.response()?.bodyToString().orEmpty()
+            val status = classify(body, op.field.name, rr.response()?.statusCode()?.toInt() ?: 0)
+            statuses[op] = status
+
+            findings += operationFindings(ctx, op, loc, body, rr, sensitive)
+        }
+
+        // Per-operation locations keep issues distinct; dedupe like CheckEngine.
+        return ScanResult(statuses, findings.distinctBy { it.checkId to it.location })
+    }
+
+    private fun buildDoc(schema: SchemaModel?, op: Operation, sensitive: List<String>): String {
+        // No schema (reconstruction gave only names) -> bare field probe.
+        if (schema == null) return "query { ${op.field.name} }"
+        return QueryBuilder.operationDocument(schema, op, sensitive)
+    }
+
+    private fun operationFindings(
+        ctx: CheckContext,
+        op: Operation,
+        loc: String,
+        body: String,
+        rr: HttpRequestResponse,
+        sensitive: List<String>,
+    ): List<Finding> {
+        val out = mutableListOf<Finding>()
+        val field = op.field.name
+
+        // BFLA (API5): privileged-named operation authorized for identity A.
+        if (Heuristics.isPrivilegedField(field) && BflaCheck.authorized(body, field)) {
+            out += Finding(
+                name = "BFLA: privileged operation '$field' authorized",
+                detail = "The privileged-looking operation `$field` returned data with no authorization " +
+                    "error for the configured identity. Confirm that identity is unprivileged for it.\n\n" +
+                    "CVSS v3.1: AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N (6.5, Medium).",
+                severity = Severity.HIGH,
+                confidence = Confidence.FIRM,
+                remediation = "Enforce function-level authorization server-side (deny-by-default).",
+                evidence = listOf(rr),
+                checkId = "op-bfla",
+                owaspId = "API5:2023",
+                location = loc,
+            )
+        }
+
+        // Sensitive property exposure (API3): sensitive leaves returned non-null.
+        if (sensitive.isNotEmpty()) {
+            val exposed = FieldAuthzCheck.exposedFields(body, field, sensitive)
+            if (exposed.isNotEmpty()) {
+                out += Finding(
+                    name = "Sensitive fields exposed by '$field' (${exposed.joinToString(", ")})",
+                    detail = "Operation `$field` returned sensitive field(s) ${exposed.joinToString(", ")} " +
+                        "to the caller — missing property-level authorization.\n\n" +
+                        "CVSS v3.1: AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N (6.5, Medium).",
+                    severity = Severity.HIGH,
+                    confidence = Confidence.FIRM,
+                    remediation = "Resolve sensitive fields only for authorized principals, or remove them from the graph.",
+                    evidence = listOf(rr),
+                    checkId = "op-field-authz",
+                    owaspId = "API3:2023",
+                    location = loc,
+                )
+            }
+        }
+
+        // Verbose errors (API8) tagged to this operation.
+        val indicators = Heuristics.verboseIndicators(body)
+        if (indicators.isNotEmpty()) {
+            out += Finding(
+                name = "Verbose error from '$field'",
+                detail = "Probing `$field` leaked internal details: ${indicators.joinToString("; ")}.\n\n" +
+                    "CVSS v3.1: AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N (5.3, Medium).",
+                severity = Severity.MEDIUM,
+                confidence = Confidence.FIRM,
+                remediation = "Return generic errors in production; strip stack traces from responses.",
+                evidence = listOf(rr),
+                checkId = "op-verbose-errors",
+                owaspId = "API8:2023",
+                location = loc,
+            )
+        }
+
+        // BOLA (API1): id-addressed, single-required-arg operation accessible across two identities.
+        bolaFinding(ctx, op, loc, body, rr)?.let { out += it }
+
+        return out
+    }
+
+    private fun bolaFinding(
+        ctx: CheckContext,
+        op: Operation,
+        loc: String,
+        primaryBody: String,
+        primaryRr: HttpRequestResponse,
+    ): Finding? {
+        if (!ctx.config.hasTwoIdentities) return null
+        val schema = ctx.schema ?: return null
+        val idArg = op.field.args.firstOrNull { it.name.lowercase() in SchemaModel.ID_ARG_NAMES } ?: return null
+        // Only when the id arg is the sole required arg, so a single-arg query is valid.
+        if (op.field.args.any { it.typeRef.isNonNull() && it != idArg }) return null
+
+        val id = ctx.config.knownObjectId ?: "1"
+        val bolaDoc = QueryBuilder.singleArgQuery(schema, op.field, idArg.name, id)
+
+        // identity A is the primary probe only if it used the same single-arg doc; re-send to be safe.
+        val aRr = GraphQLHttp.postJson(ctx.api, ctx.request, GraphQLHttp.queryEnvelope(bolaDoc), ctx.config.authHeadersA)
+        val bRr = GraphQLHttp.postJson(ctx.api, ctx.request, GraphQLHttp.queryEnvelope(bolaDoc), ctx.config.authHeadersB)
+        val aBody = aRr.response()?.bodyToString().orEmpty()
+        val bBody = bRr.response()?.bodyToString().orEmpty()
+
+        val verdict = BolaCheck.decide(aBody, bBody, op.field.name, knownOwnership = ctx.config.knownObjectId != null)
+            ?: return null
+
+        return Finding(
+            name = "Potential BOLA on '${op.field.name}' (cross-identity object access)",
+            detail = "${verdict.detail}\nTarget: `${op.field.name}(${idArg.name}: ${QueryBuilder.literal(id)})`.\n\n" +
+                "CVSS v3.1: AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N (6.5, Medium); higher if enumerable or mutable.",
+            severity = Severity.HIGH,
+            confidence = verdict.confidence,
+            remediation = "Enforce object-level authorization in the resolver; prefer unguessable ids.",
+            evidence = listOf(aRr, bRr),
+            checkId = "op-bola",
+            owaspId = "API1:2023",
+            location = loc,
+        )
+    }
+
+    /** Sensitive scalar/enum leaf fields on the operation's return object type. */
+    private fun sensitiveLeaves(schema: SchemaModel, op: Operation): List<String> {
+        val rt = schema.type(op.field.typeRef.namedType()) ?: return emptyList()
+        return rt.fields.filter { Heuristics.isSensitiveField(it.name) }.map { it.name }
+    }
+
+    companion object {
+        fun classify(body: String, field: String, status: Int): OperationStatus = when {
+            Heuristics.containsAuthzError(body) -> OperationStatus.DENIED
+            GraphQLResponses.fieldNonNull(body, field) -> OperationStatus.RESOLVED
+            GraphQLHttp.errorMessages(body).isEmpty() && status in 200..299 -> OperationStatus.EMPTY
+            else -> OperationStatus.ERROR
+        }
+    }
+}

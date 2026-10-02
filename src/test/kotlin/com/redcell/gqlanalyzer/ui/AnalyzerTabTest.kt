@@ -1,12 +1,33 @@
 package com.redcell.gqlanalyzer.ui
 
+import burp.api.montoya.MontoyaApi
+import burp.api.montoya.http.message.requests.HttpRequest
 import com.redcell.gqlanalyzer.checks.SchemaFixtures
+import io.mockk.every
+import io.mockk.mockk
 import javax.swing.tree.DefaultMutableTreeNode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class AnalyzerTabTest {
+
+    @Test
+    fun `addTarget retains a tab per request instead of overwriting`() {
+        System.setProperty("java.awt.headless", "true")
+        val api = mockk<MontoyaApi>(relaxed = true)
+        val tab = AnalyzerTab(api)
+
+        val req1 = mockk<HttpRequest>(relaxed = true)
+        every { req1.url() } returns "https://a.example/graphql"
+        val req2 = mockk<HttpRequest>(relaxed = true)
+        every { req2.url() } returns "https://b.example/graphql"
+
+        tab.addTarget(req1)
+        tab.addTarget(req2)
+
+        assertEquals(2, tab.targetCount()) // both retained, not just the last
+    }
 
     @Test
     fun `parseHeaders reads header lines and ignores junk`() {
