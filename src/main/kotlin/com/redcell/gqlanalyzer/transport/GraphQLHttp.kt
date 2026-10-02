@@ -63,6 +63,24 @@ object GraphQLHttp {
         return api.http().sendRequest(req)
     }
 
+    /** Plain GET of the base path (query stripped, no body) — e.g. to fetch a served IDE page. */
+    fun getPath(api: MontoyaApi, base: HttpRequest): HttpRequestResponse {
+        val path = base.path().substringBefore('?')
+        val req = base.withMethod("GET").withPath(path).withBody("")
+        return api.http().sendRequest(req)
+    }
+
+    /**
+     * POST a GraphQL JSON envelope with Content-Type: text/plain — a CORS "simple
+     * request" that skips preflight, used to probe cross-site forgeability.
+     */
+    fun postText(api: MontoyaApi, base: HttpRequest, body: String): HttpRequestResponse {
+        val req = base.withMethod("POST")
+            .withBody(body)
+            .withUpdatedHeader("Content-Type", "text/plain")
+        return api.http().sendRequest(req)
+    }
+
     private fun urlEncode(s: String): String =
         java.net.URLEncoder.encode(s, Charsets.UTF_8).replace("+", "%20")
 

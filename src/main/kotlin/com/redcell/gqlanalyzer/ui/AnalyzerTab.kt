@@ -12,6 +12,7 @@ import javax.swing.JButton
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JTabbedPane
+import javax.swing.JTextArea
 import javax.swing.SwingUtilities
 
 /**
@@ -39,14 +40,15 @@ class AnalyzerTab(
     private fun addWelcomeTab() {
         val panel = JPanel(BorderLayout())
         panel.border = BorderFactory.createEmptyBorder(16, 16, 16, 16)
-        panel.add(
-            JLabel(
-                "<html>No targets yet. Right-click a request &rarr; " +
-                    "<b>Send to GraphQL Analyzer</b> to open a target tab, then " +
-                    "<b>Enumerate</b> and <b>Scan selected</b>.</html>",
-            ),
-            BorderLayout.NORTH,
-        )
+        // Plain-text area (no HTML) so no markup can render literally under Burp's L&F.
+        val welcome = JTextArea(WELCOME_TEXT).apply {
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            isOpaque = false
+            border = null
+        }
+        panel.add(welcome, BorderLayout.NORTH)
         tabs.addTab("Welcome", panel)
     }
 
@@ -100,6 +102,10 @@ class AnalyzerTab(
     }
 
     companion object {
+        const val WELCOME_TEXT =
+            "No targets yet. Right-click a request → \"Send to GraphQL Analyzer\" to open a " +
+                "target tab, then use Enumerate and Scan selected."
+
         /** "Header: value" lines -> map; blanks and malformed lines ignored. */
         fun parseHeaders(text: String): Map<String, String> =
             text.lineSequence()

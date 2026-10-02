@@ -30,6 +30,12 @@ class AnalyzerTabTest {
     }
 
     @Test
+    fun `welcome text is plain with no html tags`() {
+        assertTrue(!AnalyzerTab.WELCOME_TEXT.contains("<"))
+        assertTrue(!AnalyzerTab.WELCOME_TEXT.contains(">"))
+    }
+
+    @Test
     fun `parseHeaders reads header lines and ignores junk`() {
         val text = """
             Authorization: Bearer abc123

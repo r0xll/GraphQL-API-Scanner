@@ -1,7 +1,6 @@
 package com.redcell.gqlanalyzer.ui
 
 import com.redcell.gqlanalyzer.model.Operation
-import com.redcell.gqlanalyzer.model.OperationKind
 import com.redcell.gqlanalyzer.model.OperationStatus
 import com.redcell.gqlanalyzer.schema.GqlInputValue
 import javax.swing.table.AbstractTableModel
@@ -25,13 +24,22 @@ class OperationsTableModel : AbstractTableModel() {
 
     fun setOperations(operations: List<Operation>) {
         rows.clear()
-        operations.forEach { op ->
-            rows += Row(op, selected = op.kind == OperationKind.QUERY)
-        }
+        // All operations selected by default; the operator deselects what they
+        // don't want before the explicit Scan (the write-safety gate).
+        operations.forEach { op -> rows += Row(op, selected = true) }
         fireTableDataChanged()
     }
 
     fun selectedOperations(): List<Operation> = rows.filter { it.selected }.map { it.operation }
+
+    /** True when every row is selected (used to pick the header-toggle direction). */
+    fun allSelected(): Boolean = rows.isNotEmpty() && rows.all { it.selected }
+
+    /** Select or clear every row (the "Test" column header toggle). */
+    fun setAllSelected(value: Boolean) {
+        rows.forEach { it.selected = value }
+        fireTableDataChanged()
+    }
 
     fun rowFor(operation: Operation): Row? = rows.firstOrNull { it.operation == operation }
 

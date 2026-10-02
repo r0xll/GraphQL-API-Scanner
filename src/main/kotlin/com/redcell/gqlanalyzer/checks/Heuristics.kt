@@ -109,4 +109,44 @@ object Heuristics {
             }
 
     private val STRINGY = setOf("String", "ID")
+
+    // ---- SSRF insertion points (API7) ----
+
+    /** Argument names that commonly carry a URL/host the server will fetch. */
+    val SSRF_ARG = setOf(
+        "url", "uri", "href", "link", "webhook", "webhookurl", "callback", "callbackurl",
+        "src", "source", "image", "imageurl", "avatar", "avatarurl", "endpoint",
+        "redirect", "redirecturl", "dest", "destination", "fetch", "fetchurl", "proxy",
+        "target", "targeturl", "next", "nexturl", "returnurl", "origin", "host", "server",
+    )
+
+    fun isSsrfArg(name: String) = norm(name) in SSRF_ARG
+
+    /** String/ID args whose name suggests the server will dereference a URL. */
+    fun ssrfInsertionPoints(schema: SchemaModel): List<InsertionPoint> =
+        schema.types.filter { it.kind == "OBJECT" }
+            .flatMap { t ->
+                t.fields.flatMap { f ->
+                    f.args.filter { it.typeRef.namedType() in STRINGY && isSsrfArg(it.name) }
+                        .map { InsertionPoint(t.name, f.name, it.name, it.typeRef.namedType() ?: "?") }
+                }
+            }
+
+    // ---- in-browser IDE exposure (API8/API9) ----
+
+    private val IDE_MARKERS = listOf(
+        Regex("""(?i)<title>\s*graphiql"""),
+        Regex("""(?i)graphiql"""),
+        Regex("""(?i)graphql\s*playground"""),
+        Regex("""(?i)GraphQLPlayground"""),
+        Regex("""(?i)\baltair[-_ ]?graphql\b"""),
+        Regex("""(?i)altair.*?graphql"""),
+        Regex("""(?i)graphql-playground-react"""),
+    )
+
+    /** Heuristic: does this HTML body look like a served GraphQL IDE (GraphiQL/Playground/Altair)? */
+    fun isGraphqlIdeHtml(body: String): Boolean {
+        if (!body.contains("<", ignoreCase = false)) return false // not HTML
+        return IDE_MARKERS.any { it.containsMatchIn(body) }
+    }
 }

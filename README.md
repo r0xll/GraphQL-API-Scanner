@@ -40,17 +40,18 @@ On load the Output tab logs:
    endpoint-level OWASP checks, and lists every root operation in the
    **Operations** grid.
 4. **Crawl & scan per operation** — the Operations grid is Burp-API-scan-style:
-   tick the operations to actively test (queries are pre-selected; **mutations and
-   subscriptions are off by default** — ticking them is the write-safety gate),
-   then click **Scan selected**. Each selected operation is probed individually; its
-   status (RESOLVED / DENIED / EMPTY / ERROR) and per-operation findings appear in
-   the grid, and every finding is added to Burp's site map as an `AuditIssue` with
-   evidence. Per-operation findings cover BOLA (API1), BFLA (API5), sensitive-field
-   exposure (API3), and verbose errors (API8), tagged `url#QUERY.fieldName`.
-5. **Two-identity checks (BOLA/BFLA)** — supply two identities in the tab's config
-   (one `Header: value` per line) and, for a firm BOLA proof, a known object id
-   owned by identity A. These checks are skipped unless configured — no creds are
-   ever hardcoded.
+   **all operations are ticked by default**; untick the ones you don't want, or click
+   the **Test** column header to toggle all on/off, then click **Scan selected**. (The
+   explicit Scan — not enumerate — is the write-safety gate for mutations.) Each
+   selected operation is probed individually; its status (RESOLVED / DENIED / EMPTY /
+   ERROR) and per-operation findings appear in the grid, and every finding is added to
+   Burp's site map as an `AuditIssue` with evidence. Per-operation findings cover BOLA
+   (API1), BFLA (API5), sensitive-field exposure (API3), and verbose errors (API8),
+   tagged `url#QUERY.fieldName`.
+5. **Two-identity checks (BOLA/BFLA)** — in each target's **Config** sub-tab, supply
+   two identities (one `Header: value` per line) and, for a firm BOLA proof, a known
+   object id owned by identity A. These checks are skipped unless configured — no creds
+   are ever hardcoded.
 
 ## Checks
 
@@ -67,6 +68,10 @@ On load the Output tab logs:
 | BFLA | API5:2023 | privileged query reachable by low-priv identity (read-only) |
 | Verbose errors | API8:2023 | stack-trace / SQL / framework leakage |
 | Injection insertion points | (A03 Injection) | schema-static seeder for sqlmap/nuclei |
+| SSRF candidate arguments | API7:2023 | schema-static seeder (url/webhook/callback args) + Collaborator scaffold |
+| GraphQL IDE exposed in prod | API8:2023 | GET detects GraphiQL/Playground/Altair |
+| Content-Type CORS bypass | API8:2023 | `{__typename}` as `text/plain` (simple request, no preflight) |
+| Directive overloading | API4:2023 | 10 repeated `@skip` directives accepted (proof-capped) |
 
 ## Stack
 

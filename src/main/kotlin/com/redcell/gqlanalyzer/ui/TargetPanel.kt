@@ -13,12 +13,15 @@ import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.GridLayout
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.BorderFactory
 import javax.swing.JButton
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
+import javax.swing.JTabbedPane
 import javax.swing.JTable
 import javax.swing.JTextArea
 import javax.swing.JTextField
@@ -58,9 +61,15 @@ class TargetPanel(
         val root = JPanel(BorderLayout(8, 8))
         root.border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
         root.add(buildTop(), BorderLayout.NORTH)
-        root.add(buildCenter(), BorderLayout.CENTER)
+
+        val sub = JTabbedPane()
+        sub.addTab("Scan", buildScanView())
+        sub.addTab("Config", buildConfigView())
+        root.add(sub, BorderLayout.CENTER)
+
         enumerateButton.addActionListener { enumerate() }
         scanButton.addActionListener { scanSelected() }
+        installSelectAllHeaderToggle()
         return root
     }
 
@@ -75,16 +84,25 @@ class TargetPanel(
         header.add(JLabel(targetLabel()), BorderLayout.CENTER)
         header.add(buttons, BorderLayout.EAST)
 
+        top.add(header, BorderLayout.NORTH)
+        top.add(statusLabel, BorderLayout.SOUTH)
+        return top
+    }
+
+    private fun buildConfigView(): Component {
         val config = JPanel(GridLayout(1, 3, 8, 8))
         config.border = BorderFactory.createTitledBorder("Config (optional) — one 'Header: value' per line")
         config.add(labeled("Identity A (low-priv)", JScrollPane(identityA)))
         config.add(labeled("Identity B (attacker)", JScrollPane(identityB)))
         config.add(labeled("Known object id (A-owned)", knownIdField))
 
-        top.add(header, BorderLayout.NORTH)
-        top.add(config, BorderLayout.CENTER)
-        top.add(statusLabel, BorderLayout.SOUTH)
-        return top
+        val wrapper = JPanel(BorderLayout(8, 8))
+        wrapper.add(config, BorderLayout.NORTH)
+        wrapper.add(
+            JLabel("Identities drive BOLA/BFLA (skipped unless set). Credentials are never stored outside this tab."),
+            BorderLayout.SOUTH,
+        )
+        return wrapper
     }
 
     private fun labeled(title: String, inner: Component): JPanel {
@@ -94,11 +112,11 @@ class TargetPanel(
         return p
     }
 
-    private fun buildCenter(): Component {
+    private fun buildScanView(): Component {
         val treeScroll = JScrollPane(schemaTree).apply { preferredSize = Dimension(320, 400) }
 
         val opsScroll = JScrollPane(operationsTable)
-        opsScroll.border = BorderFactory.createTitledBorder("Operations — tick to test (queries preselected; mutations/subscriptions off)")
+        opsScroll.border = BorderFactory.createTitledBorder("Operations — all ticked by default; untick to skip, or click the 'Test' header to toggle all")
         val findingsScroll = JScrollPane(findingsTable)
         findingsScroll.border = BorderFactory.createTitledBorder("Findings")
         val rightSplit = JSplitPane(JSplitPane.VERTICAL_SPLIT, opsScroll, findingsScroll)
@@ -109,6 +127,18 @@ class TargetPanel(
         split.dividerLocation = 330
         split.resizeWeight = 0.3
         return split
+    }
+
+    /** Clicking the "Test" column header selects/deselects every operation. */
+    private fun installSelectAllHeaderToggle() {
+        operationsTable.tableHeader.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                val col = operationsTable.columnAtPoint(e.point)
+                if (col == 0) {
+                    operationsModel.setAllSelected(!operationsModel.allSelected())
+                }
+            }
+        })
     }
 
     private fun targetLabel(): String = runCatching { base.url() }.getOrDefault(base.path())

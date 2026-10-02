@@ -12,13 +12,26 @@ class OperationsTableModelTest {
     private val ops = OperationEnumerator.enumerate(SchemaFixtures.full())
 
     @Test
-    fun `queries preselected and mutations not`() {
+    fun `all operations selected by default`() {
         val model = OperationsTableModel()
         model.setOperations(ops)
+        assertTrue(model.allSelected())
         val selected = model.selectedOperations().map { it.name }.toSet()
         assertTrue("QUERY.user" in selected)
-        assertTrue("QUERY.me" in selected)
-        assertTrue("MUTATION.updateUser" !in selected) // mutation off by default
+        assertTrue("MUTATION.updateUser" in selected) // mutations now on by default
+        assertEquals(ops.size, model.selectedOperations().size)
+    }
+
+    @Test
+    fun `setAllSelected toggles every row`() {
+        val model = OperationsTableModel()
+        model.setOperations(ops)
+        model.setAllSelected(false)
+        assertTrue(!model.allSelected())
+        assertTrue(model.selectedOperations().isEmpty())
+        model.setAllSelected(true)
+        assertTrue(model.allSelected())
+        assertEquals(ops.size, model.selectedOperations().size)
     }
 
     @Test

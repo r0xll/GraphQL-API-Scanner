@@ -27,7 +27,9 @@ is committed, pushed, and the build is green:
 
 - Proof-level only: no check sends > 10 batched/aliased ops, recurses depth as an
   attack, or writes privileged state.
-- Mutations/subscriptions are executed only when the operator selects them in the
-  Operations grid (selection is the write-safety gate).
+- Mutations/subscriptions are executed only via the explicit **Scan selected** action
+  after the operator reviews the Operations grid. Operations default to selected, so
+  the write-safety gate is the operator deselecting what they don't want (and the
+  deliberate Scan click) — never an automatic scan on enumerate.
 - Two-auth checks (BOLA/BFLA) take credentials from config — never hardcoded.
 - Every check/analyzer is unit-tested against a fixture.
