@@ -48,6 +48,24 @@ object GraphQLHttp {
     /** Send an arbitrary already-built request. */
     fun send(api: MontoyaApi, req: HttpRequest): HttpRequestResponse = api.http().sendRequest(req)
 
+    /** GET ?query=<url-encoded> on the base service — for CSRF/GET-acceptance probing. */
+    fun getWithQuery(api: MontoyaApi, base: HttpRequest, query: String): HttpRequestResponse {
+        val path = base.path().substringBefore('?') + "?query=" + urlEncode(query)
+        val req = base.withMethod("GET").withPath(path).withBody("")
+        return api.http().sendRequest(req)
+    }
+
+    /** POST query=<url-encoded> as application/x-www-form-urlencoded — simple-request CSRF probe. */
+    fun postForm(api: MontoyaApi, base: HttpRequest, query: String): HttpRequestResponse {
+        val req = base.withMethod("POST")
+            .withBody("query=" + urlEncode(query))
+            .withUpdatedHeader("Content-Type", "application/x-www-form-urlencoded")
+        return api.http().sendRequest(req)
+    }
+
+    private fun urlEncode(s: String): String =
+        java.net.URLEncoder.encode(s, Charsets.UTF_8).replace("+", "%20")
+
     /** Top-level GraphQL error messages from a response body (empty on parse failure). */
     fun errorMessages(responseBody: String): List<String> {
         val root = runCatching { json.parseToJsonElement(responseBody) }.getOrNull() ?: return emptyList()
