@@ -15,7 +15,13 @@ data class CheckConfig(
     val authHeadersB: Map<String, String> = emptyMap(),
     /** Hard proof-level cap on batched/aliased operations. Never exceed. */
     val maxBatch: Int = 10,
-)
+    /** Optional: a known object id that belongs to identity A, for a FIRM BOLA proof. */
+    val knownObjectId: String? = null,
+    /** Max nesting depth for the single depth-proof query. Never escalated. */
+    val depthProof: Int = 10,
+) {
+    val hasTwoIdentities: Boolean get() = authHeadersA.isNotEmpty() && authHeadersB.isNotEmpty()
+}
 
 /**
  * Everything a check needs: the Montoya API handle, the base GraphQL request to

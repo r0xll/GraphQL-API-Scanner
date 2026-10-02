@@ -1,0 +1,112 @@
+package com.redcell.gqlanalyzer.checks
+
+import com.redcell.gqlanalyzer.schema.GqlField
+import com.redcell.gqlanalyzer.schema.GqlType
+import com.redcell.gqlanalyzer.schema.SchemaModel
+
+/**
+ * Pure name heuristics and schema/response analysis shared by Phase-3 checks.
+ * Everything here is deterministic and unit-testable without Montoya.
+ */
+object Heuristics {
+
+    /** Field names that commonly hold data subject to property-level authz (API3). */
+    val SENSITIVE_FIELD = setOf(
+        "password", "passwordhash", "passwd", "pwd", "hash", "salt",
+        "token", "accesstoken", "refreshtoken", "apikey", "api_key", "secret",
+        "ssn", "socialsecurity", "creditcard", "card", "cvv", "pan",
+        "privatekey", "sessiontoken", "otp", "mfasecret", "totpsecret",
+        "dateofbirth", "dob",
+    )
+
+    /** Root field / function names that usually require elevated privilege (API5 BFLA). */
+    val PRIVILEGED_FIELD = setOf(
+        "admin", "admins", "adminusers", "allusers", "users", "allsecrets",
+        "secrets", "auditlog", "auditlogs", "systemconfig", "config",
+        "impersonate", "internal", "debug", "metrics",
+    )
+
+    /** Input-field names that should never be client-settable (API3 mass assignment). */
+    val PRIVILEGED_INPUT = setOf(
+        "role", "roles", "isadmin", "admin", "isstaff", "isactive", "active",
+        "verified", "isverified", "emailverified", "permissions", "scopes",
+        "balance", "credit", "credits", "approved", "status", "accountstatus",
+        "tenantid", "ownerid", "userid",
+    )
+
+    private fun norm(s: String) = s.lowercase().replace("_", "")
+
+    fun isSensitiveField(name: String) = norm(name) in SENSITIVE_FIELD
+    fun isPrivilegedField(name: String) = norm(name) in PRIVILEGED_FIELD
+    fun isPrivilegedInput(name: String) = norm(name) in PRIVILEGED_INPUT
+
+    // ---- response-text classification ----
+
+    private val AUTHZ = Regex(
+        """(?i)\b(unauthorized|unauthenticated|not\s+authori[sz]ed|forbidden|permission denied|access denied|must be (logged in|authenticated)|requires authentication)\b""",
+    )
+
+    private val DEPTH_LIMIT = Regex(
+        """(?i)(query depth|maximum depth|depth limit|too deep|exceeds maximum|query complexity|cost limit|too complex)""",
+    )
+
+    /** Stack-trace / internal-detail markers that indicate verbose error leakage (API8). */
+    private val VERBOSE = listOf(
+        Regex("""(?i)exception"""),
+        Regex("""\bat [a-zA-Z0-9_.$]+\([A-Za-z0-9_]+\.(java|kt|rb|py|go|cs):\d+\)"""),
+        Regex("""(?i)stacktrace"""),
+        Regex("""(?i)\b(sqlstate|syntax error at or near|ORA-\d{5}|SQLException|pg_query|mysqli?)\b"""),
+        Regex("""(?i)(org\.(hibernate|springframework)|com\.sun|java\.lang\.[A-Za-z]+Exception)"""),
+        Regex("""(?i)(/usr/|/var/www/|/home/|[a-zA-Z]:\\\\)"""),
+        Regex(""""extensions"\s*:\s*\{[^}]*"(exception|stacktrace|debug)""""),
+    )
+
+    fun containsAuthzError(body: String) = AUTHZ.containsMatchIn(body)
+    fun containsDepthLimitError(body: String) = DEPTH_LIMIT.containsMatchIn(body)
+
+    fun verboseIndicators(body: String): List<String> =
+        VERBOSE.mapNotNull { it.find(body)?.value?.take(80) }
+
+    // ---- schema analysis ----
+
+    data class SensitiveExposure(val onType: String, val field: String)
+
+    fun sensitiveFields(schema: SchemaModel): List<SensitiveExposure> =
+        schema.types.filter { it.kind == "OBJECT" || it.kind == "INTERFACE" }
+            .flatMap { t -> t.fields.filter { isSensitiveField(it.name) }.map { SensitiveExposure(t.name, it.name) } }
+
+    data class MassAssignRisk(val inputType: String, val field: String)
+
+    fun massAssignmentSurface(schema: SchemaModel): List<MassAssignRisk> =
+        schema.types.filter { it.kind == "INPUT_OBJECT" }
+            .flatMap { t -> t.inputFields.filter { isPrivilegedInput(it.name) }.map { MassAssignRisk(t.name, it.name) } }
+
+    /** Root query fields that require no mandatory args (safe to probe). */
+    fun noArgQueryFields(schema: SchemaModel): List<GqlField> =
+        schema.queries().filter { f -> f.args.none { it.typeRef.isNonNull() } }
+
+    fun privilegedQueryFields(schema: SchemaModel): List<GqlField> =
+        schema.queries().filter { isPrivilegedField(it.name) }
+
+    /** Leaf (scalar/enum) fields on a type — for building a concrete selection set. */
+    fun scalarLeafFields(schema: SchemaModel, type: GqlType): List<GqlField> =
+        type.fields.filter { f ->
+            val named = f.typeRef.namedType()
+            val rt = schema.type(named)
+            f.args.none { it.typeRef.isNonNull() } && (rt == null || rt.kind == "SCALAR" || rt.kind == "ENUM")
+        }
+
+    /** String/ID argument insertion points across the whole schema, for injection tooling. */
+    data class InsertionPoint(val parentType: String, val field: String, val arg: String, val argType: String)
+
+    fun injectionInsertionPoints(schema: SchemaModel): List<InsertionPoint> =
+        schema.types.filter { it.kind == "OBJECT" }
+            .flatMap { t ->
+                t.fields.flatMap { f ->
+                    f.args.filter { it.typeRef.namedType() in STRINGY }
+                        .map { InsertionPoint(t.name, f.name, it.name, it.typeRef.namedType() ?: "?") }
+                }
+            }
+
+    private val STRINGY = setOf("String", "ID")
+}

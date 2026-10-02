@@ -7,6 +7,7 @@ import burp.api.montoya.http.message.requests.HttpRequest
 import burp.api.montoya.http.message.responses.HttpResponse
 import com.redcell.gqlanalyzer.model.CheckConfig
 import com.redcell.gqlanalyzer.model.CheckContext
+import com.redcell.gqlanalyzer.schema.SchemaModel
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -36,6 +37,7 @@ object MockContext {
     fun build(
         responses: List<HttpRequestResponse>,
         config: CheckConfig = CheckConfig(),
+        schema: SchemaModel? = null,
     ): Pair<CheckContext, Sent> {
         val sent = Sent()
         val base = mockk<HttpRequest>()
@@ -61,6 +63,6 @@ object MockContext {
         every { api.http() } returns http
         every { api.logging() } returns mockk(relaxed = true)
 
-        return CheckContext(api, base, schema = null, config = config) to sent
+        return CheckContext(api, base, schema = schema, config = config) to sent
     }
 }

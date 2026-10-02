@@ -2,6 +2,7 @@ package com.redcell.gqlanalyzer.transport
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 
@@ -13,6 +14,19 @@ object GraphQLResponses {
     private fun dataObject(body: String): JsonObject? {
         val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject ?: return null
         return root["data"] as? JsonObject
+    }
+
+    /** The value of data.<field>, or null if absent/JSON-null/unparseable. */
+    fun dataField(body: String, field: String): JsonElement? =
+        dataObject(body)?.get(field)?.takeIf { it !is JsonNull }
+
+    fun fieldNonNull(body: String, field: String): Boolean = dataField(body, field) != null
+
+    /** Same non-null value returned for the field in both bodies (object leaked across identities). */
+    fun fieldEqualNonNull(bodyA: String, bodyB: String, field: String): Boolean {
+        val a = dataField(bodyA, field) ?: return false
+        val b = dataField(bodyB, field) ?: return false
+        return a == b
     }
 
     /** Every alias key is present and non-null in a single response's `data`. */
