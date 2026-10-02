@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0). The tag must already exist."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Resolve version from tag
+        id: ver
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build fat JAR
+        run: ./gradlew --no-daemon -PreleaseVersion=${{ steps.ver.outputs.version }} build shadowJar
+
+      - name: Collect artifact
+        id: artifact
+        run: |
+          jar=$(ls build/libs/*-all.jar | head -1)
+          echo "path=$jar" >> "$GITHUB_OUTPUT"
+          echo "Built: $jar"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: GraphQL OWASP-API Analyzer ${{ github.event.inputs.tag || github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: ${{ steps.artifact.outputs.path }}
+          body: |
+            Burp Suite extension — load the attached `*-all.jar` via
+            **Extensions → Add → Java**.
+
+            Built from ${{ github.sha }} with JDK 21. Montoya API is provided by
+            Burp at runtime and is not bundled.

@@ -5,7 +5,8 @@ plugins {
 }
 
 group = "com.redcell"
-version = "0.1.0"
+// Overridable for releases: -PreleaseVersion=0.2.0 (CI tags strip the leading "v").
+version = (findProperty("releaseVersion") as String?)?.takeIf { it.isNotBlank() } ?: "0.1.0"
 
 repositories {
     mavenCentral()
