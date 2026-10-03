@@ -1,5 +1,6 @@
 package com.redcell.gqlanalyzer.checks
 
+import com.redcell.gqlanalyzer.checks.impl.ActiveInjectionCheck
 import com.redcell.gqlanalyzer.checks.impl.ActiveSsrfCheck
 import com.redcell.gqlanalyzer.checks.impl.AltIntrospectionCheck
 import com.redcell.gqlanalyzer.checks.impl.ApqDetectionCheck
@@ -68,6 +69,8 @@ object AllChecks {
         // v0.6.0 — active out-of-band confirmation (Burp Collaborator)
         ActiveSsrfCheck(),
         OobCanaryInjectionCheck(),
+        // v0.13.0 — active in-band injection (error-based + SSTI reflection)
+        ActiveInjectionCheck(),
         // v0.7.0 — auth & deeper authz
         IdorEnumerationCheck(),
         AuthAmplificationCheck(),

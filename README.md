@@ -84,6 +84,7 @@ On load the Output tab logs:
 | BFLA | API5:2023 | privileged query reachable by low-priv identity (read-only) |
 | Verbose errors | API8:2023 | stack-trace / SQL / framework leakage |
 | Injection insertion points | (A03 Injection) | schema-static seeder for sqlmap/nuclei |
+| Active in-band injection | API8:2023 / A03 | query-root String/ID args: `'` → backend SQL/NoSQL error (baseline-subtracted), `${7*7}` → evaluated to `49` (SSTI) |
 | SSRF candidate arguments | API7:2023 | schema-static seeder (url/webhook/callback args) + Collaborator scaffold |
 | GraphQL IDE exposed in prod | API8:2023 | GET detects GraphiQL/Playground/Altair |
 | Content-Type CORS bypass | API8:2023 | `{__typename}` as `text/plain` (simple request, no preflight) |
@@ -116,6 +117,18 @@ arguments and report only those that produce a real out-of-band interaction. The
 mutation), use canary URLs only (non-destructive), and poll briefly for interactions —
 so an Enumerate run with Collaborator enabled takes a little longer. This confirmation
 step is the extension's key differentiator over static GraphQL scanners.
+
+## Active in-band injection (no Collaborator)
+
+`active-injection` complements the static seeder and the OOB canary with a lightweight,
+non-destructive in-band probe. For each String/ID argument on a **read-only root query
+field** (capped, never a mutation/subscription) it sends a clean baseline request, then a
+single quote and `${7*7}`, and compares against the baseline: a *new* backend error
+signature (SQLSTATE / SQL syntax / Oracle / Mongo …) ⇒ error-based SQL/NoSQL injection
+(FIRM), and `${7*7}` coming back as `49` ⇒ template/expression injection (SSTI, TENTATIVE —
+confirm it's evaluation, not coincidence). Payloads are benign (a quote and an arithmetic
+expression); there is no boolean-blind data tampering, stacked/destructive SQL, or OS command
+execution. Use the injection-seeder's sqlmap scaffold to confirm and exploit a hit.
 
 ## Stack
 

@@ -229,4 +229,36 @@ object Heuristics {
 
     /** The scalar/type name a single coercion error names (`Expected value of type "DateTime!"` → `DateTime`), else null. */
     fun coercionTypeName(message: String): String? = COERCION_TYPE.find(message)?.groupValues?.get(1)
+
+    // ---- active in-band injection signatures (A03 / API8) ----
+
+    /**
+     * Backend error signatures that a resolver leaked an injected payload into a
+     * SQL/NoSQL/OS sink. Kept distinct from [VERBOSE] so a hit is attributable to the
+     * payload we sent (error-based injection) rather than generic stack-trace noise.
+     */
+    private val INJECTION_SIGNATURES: List<Pair<String, Regex>> = listOf(
+        "SQLSTATE" to Regex("""(?i)SQLSTATE\[?"""),
+        "Postgres syntax error" to Regex("""(?i)syntax error at or near"""),
+        "MySQL syntax error" to Regex("""(?i)You have an error in your SQL syntax"""),
+        "unterminated quoted string" to Regex("""(?i)unterminated quoted string"""),
+        "quoted string not properly terminated" to Regex("""(?i)quoted string not properly terminated"""),
+        "Oracle error" to Regex("""(?i)\bORA-\d{5}\b"""),
+        "SQLite error" to Regex("""(?i)(SQLiteException|unrecognized token|SQL logic error)"""),
+        "ODBC/SQL Server error" to Regex("""(?i)(Unclosed quotation mark|Microsoft SQL Server|ODBC SQL)"""),
+        "MongoDB error" to Regex("""(?i)(MongoError|BSONError|E11000|unknown operator \$)"""),
+        "command/path leak" to Regex("""(?i)(sh: .*: not found|/bin/sh:|cannot execute binary)"""),
+    )
+
+    /** Named backend injection-error signatures present in [body] (empty when none). */
+    fun injectionSignatures(body: String): List<String> =
+        INJECTION_SIGNATURES.filter { it.second.containsMatchIn(body) }.map { it.first }
+
+    /**
+     * True when [body] contains [needle] (default `49`), indicating the server evaluated
+     * an injected arithmetic/template expression (`7*7` → `49`) — template-injection (SSTI)
+     * or expression-evaluation reflection. The caller must confirm it is evaluation, not the
+     * raw payload echoed back.
+     */
+    fun evaluatedExpression(body: String, needle: String = "49"): Boolean = body.contains(needle)
 }
