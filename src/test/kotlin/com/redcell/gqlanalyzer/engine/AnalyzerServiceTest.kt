@@ -50,4 +50,23 @@ class AnalyzerServiceTest {
         assertEquals("stub", result.findings[0].checkId)
         assertEquals("https://target.example/graphql", result.findings[0].location)
     }
+
+    @Test
+    fun `enumerateWithProvidedSchema uses the given schema and runs endpoint checks without introspecting`() {
+        val provided = com.redcell.gqlanalyzer.checks.SchemaFixtures.full()
+        val intro = mockk<IntrospectionRunner>() // must NOT be called
+        val stub = StubCheck()
+        val api = mockk<MontoyaApi>(relaxed = true)
+        val base = mockk<HttpRequest>()
+        every { base.url() } returns "https://target.example/graphql"
+
+        val svc = AnalyzerService(api, CheckEngine(listOf(stub)), intro)
+        val result = svc.enumerateWithProvidedSchema(base, CheckConfig(), provided)
+
+        assertSame(provided, result.schema)
+        assertSame(provided, stub.seenSchema) // provided schema reached the check context
+        assertTrue(result.operations.isNotEmpty()) // operations enumerated from the provided schema
+        assertEquals(1, result.endpointFindings.size)
+        io.mockk.verify(exactly = 0) { intro.run(any()) } // no introspection request
+    }
 }

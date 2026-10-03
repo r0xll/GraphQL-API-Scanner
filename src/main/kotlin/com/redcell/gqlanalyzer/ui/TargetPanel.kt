@@ -6,6 +6,7 @@ import com.redcell.gqlanalyzer.engine.AnalyzerService
 import com.redcell.gqlanalyzer.model.CheckConfig
 import com.redcell.gqlanalyzer.model.Finding
 import com.redcell.gqlanalyzer.model.Operation
+import com.redcell.gqlanalyzer.schema.SchemaFileLoader
 import com.redcell.gqlanalyzer.schema.SchemaModel
 import com.redcell.gqlanalyzer.scanner.FindingAuditIssue
 import java.awt.BorderLayout
@@ -17,6 +18,7 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.BorderFactory
 import javax.swing.JButton
+import javax.swing.JFileChooser
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JScrollPane
@@ -43,6 +45,7 @@ class TargetPanel(
 
     private val statusLabel = JLabel(" ")
     private val enumerateButton = JButton("Enumerate")
+    private val loadSchemaButton = JButton("Load schema (OOB)…")
     private val scanButton = JButton("Scan selected").apply { isEnabled = false }
 
     private val identityA = JTextArea(3, 24)
@@ -70,6 +73,7 @@ class TargetPanel(
         root.add(sub, BorderLayout.CENTER)
 
         enumerateButton.addActionListener { enumerate() }
+        loadSchemaButton.addActionListener { loadSchemaFile() }
         scanButton.addActionListener { scanSelected() }
         installSelectAllHeaderToggle()
         return root
@@ -80,6 +84,7 @@ class TargetPanel(
 
         val buttons = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0))
         buttons.add(enumerateButton)
+        buttons.add(loadSchemaButton)
         buttons.add(scanButton)
 
         val header = JPanel(BorderLayout(8, 8))
@@ -170,19 +175,53 @@ class TargetPanel(
                 enumerateButton.isEnabled = true
                 res.onFailure { statusLabel.text = "Error: ${it.message}" }
                     .onSuccess { r ->
-                        schema = r.schema
-                        schemaTree.model = SchemaTree.build(r.schema)
-                        operationsModel.setOperations(r.operations)
-                        findings.clear()
-                        findings.addAll(r.endpointFindings)
-                        findingsModel.setFindings(findings.toList())
-                        r.endpointFindings.forEach { api.siteMap().add(FindingAuditIssue.toAuditIssue(it)) }
-                        scanButton.isEnabled = r.operations.isNotEmpty()
                         val intro = if (r.introspectionEnabled) "introspection ON" else "introspection off/partial"
-                        statusLabel.text = "${r.operations.size} operation(s); ${r.endpointFindings.size} endpoint finding(s); $intro."
+                        publishEnumeration(r, "live introspection ($intro)")
                     }
             }
         }
+    }
+
+    /** Load an operator-supplied schema file (introspection JSON or SDL) instead of introspecting. */
+    fun loadSchemaFile() {
+        val chooser = JFileChooser().apply { dialogTitle = "Load GraphQL schema / introspection file" }
+        if (chooser.showOpenDialog(component) != JFileChooser.APPROVE_OPTION) return
+        val file = chooser.selectedFile ?: return
+        val text = runCatching { file.readText() }.getOrElse {
+            statusLabel.text = "Could not read file: ${it.message}"
+            return
+        }
+        val parsed = SchemaFileLoader.load(text)
+        if (parsed == null) {
+            statusLabel.text = "Unrecognized schema file (expected introspection JSON or GraphQL SDL)."
+            return
+        }
+        val config = readConfig()
+        loadSchemaButton.isEnabled = false
+        enumerateButton.isEnabled = false
+        statusLabel.text = "Loading schema from ${file.name}…"
+        runOffEdt("gql-load-schema") {
+            val res = runCatching { service.enumerateWithProvidedSchema(base, config, parsed) }
+            SwingUtilities.invokeLater {
+                loadSchemaButton.isEnabled = true
+                enumerateButton.isEnabled = true
+                res.onFailure { statusLabel.text = "Error: ${it.message}" }
+                    .onSuccess { r -> publishEnumeration(r, "file: ${file.name}") }
+            }
+        }
+    }
+
+    /** Publish an enumeration result to the tree, operations grid, findings, and site map. */
+    private fun publishEnumeration(r: AnalyzerService.EnumerationResult, source: String) {
+        schema = r.schema
+        schemaTree.model = SchemaTree.build(r.schema)
+        operationsModel.setOperations(r.operations)
+        findings.clear()
+        findings.addAll(r.endpointFindings)
+        findingsModel.setFindings(findings.toList())
+        r.endpointFindings.forEach { api.siteMap().add(FindingAuditIssue.toAuditIssue(it)) }
+        scanButton.isEnabled = r.operations.isNotEmpty()
+        statusLabel.text = "${r.operations.size} operation(s); ${r.endpointFindings.size} endpoint finding(s); schema source: $source."
     }
 
     /** Actively test the ticked operations. */

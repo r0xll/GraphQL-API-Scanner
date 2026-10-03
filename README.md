@@ -38,7 +38,12 @@ On load the Output tab logs:
 3. **Enumerate** — in the target tab, click **Enumerate**: the extension confirms
    introspection, fetches (or reconstructs) the schema into the tree, runs the
    endpoint-level OWASP checks, and lists every root operation in the
-   **Operations** grid.
+   **Operations** grid. If introspection is disabled, click **Load schema (OOB)…**
+   instead and pick a client-provided schema file — an introspection JSON dump
+   (`schema.json`, in the `{"data":{"__schema":…}}`, `{"__schema":…}`, or bare-schema
+   shapes) or GraphQL **SDL** (`.graphql`/`.graphqls`). The schema populates the tree
+   and operations grid and drives the schema-static checks + per-operation scan
+   exactly as live introspection would — no introspection request is sent.
 4. **Crawl & scan per operation** — the Operations grid is Burp-API-scan-style:
    **all operations are ticked by default**; untick the ones you don't want, or click
    the **Test** column header to toggle all on/off, then click **Scan selected**. (The

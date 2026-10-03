@@ -45,10 +45,29 @@ class AnalyzerService(
     /** Confirm introspection, enumerate operations, and run endpoint-level checks once. */
     fun enumerate(base: HttpRequest, config: CheckConfig = CheckConfig()): EnumerationResult {
         val intro = introspection.run(base)
-        val ctx = CheckContext(api, base, intro.schema, config)
+        return build(base, config, intro.schema, intro.introspectionEnabled)
+    }
+
+    /**
+     * Enumerate against an operator-supplied (out-of-band) schema: no introspection
+     * request for the schema itself, but endpoint-level checks still probe the live target.
+     */
+    fun enumerateWithProvidedSchema(
+        base: HttpRequest,
+        config: CheckConfig,
+        schema: SchemaModel,
+    ): EnumerationResult = build(base, config, schema, introspectionEnabled = false)
+
+    private fun build(
+        base: HttpRequest,
+        config: CheckConfig,
+        schema: SchemaModel?,
+        introspectionEnabled: Boolean,
+    ): EnumerationResult {
+        val ctx = CheckContext(api, base, schema, config)
         val endpointFindings = engine.run(ctx)
-        val operations = intro.schema?.let { OperationEnumerator.enumerate(it) } ?: emptyList()
-        return EnumerationResult(intro.schema, intro.introspectionEnabled, operations, endpointFindings)
+        val operations = schema?.let { OperationEnumerator.enumerate(it) } ?: emptyList()
+        return EnumerationResult(schema, introspectionEnabled, operations, endpointFindings)
     }
 
     /** Actively test the operations the operator selected. */
