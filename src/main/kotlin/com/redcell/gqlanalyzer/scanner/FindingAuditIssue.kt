@@ -24,12 +24,18 @@ object FindingAuditIssue {
             *finding.evidence.toTypedArray(),
         )
 
-    fun baseUrl(finding: Finding): String = finding.location.ifEmpty {
-        runCatching { finding.evidence.firstOrNull()?.request()?.url() }.getOrNull().orEmpty()
+    fun baseUrl(finding: Finding): String {
+        val base = finding.location.ifEmpty {
+            runCatching { finding.evidence.firstOrNull()?.request()?.url() }.getOrNull().orEmpty()
+        }
+        // Make the affected operation explicit in the issue URL when it isn't already a fragment.
+        val op = finding.affectedOperation
+        return if (op != null && base.isNotEmpty() && !base.contains('#')) "$base#$op" else base
     }
 
     fun detailHtml(f: Finding): String {
         val tag = buildString {
+            f.affectedOperation?.let { append("<b>Affected operation:</b> ").append(escape(it)).append("<br>") }
             append("<b>OWASP:</b> ").append(escape(f.owaspId))
             if (f.checkId.isNotEmpty()) append(" &nbsp;|&nbsp; <b>Check:</b> ").append(escape(f.checkId))
         }

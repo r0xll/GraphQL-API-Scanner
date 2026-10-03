@@ -56,6 +56,7 @@ class BflaCheck : GraphQLCheck {
                     hidden from the UI or absent from introspection.
                 """.trimIndent(),
                 evidence = listOf(rr),
+                affectedOperation = "${schema.queryType()?.name ?: "Query"}.${target.name}",
             ),
         )
     }

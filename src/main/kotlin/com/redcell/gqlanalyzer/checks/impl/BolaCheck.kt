@@ -58,6 +58,7 @@ class BolaCheck : GraphQLCheck {
                     server-side, before returning it. Prefer unguessable ids (UUIDv4) and deny-by-default.
                 """.trimIndent(),
                 evidence = listOf(aRR, bRR),
+                affectedOperation = "${type.name}.${field.name}",
             ),
         )
     }

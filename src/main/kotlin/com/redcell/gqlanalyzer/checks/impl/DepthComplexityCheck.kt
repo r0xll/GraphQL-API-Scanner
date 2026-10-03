@@ -55,6 +55,7 @@ class DepthComplexityCheck : GraphQLCheck {
                     execution.
                 """.trimIndent(),
                 evidence = listOf(rr),
+                affectedOperation = "${schema.queryType()?.name ?: "Query"}.${cycle.entryField}",
             ),
         )
     }

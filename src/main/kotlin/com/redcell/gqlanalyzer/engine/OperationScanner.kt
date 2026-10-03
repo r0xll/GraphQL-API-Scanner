@@ -36,7 +36,8 @@ class OperationScanner {
         val findings = mutableListOf<Finding>()
 
         for (op in operations) {
-            val loc = if (baseUrl.isEmpty()) op.name else "$baseUrl#${op.name}"
+            val opLabel = "${op.parentTypeName}.${op.field.name}"
+            val loc = if (baseUrl.isEmpty()) opLabel else "$baseUrl#$opLabel"
             val sensitive = if (schema != null) sensitiveLeaves(schema, op) else emptyList()
             val doc = buildDoc(schema, op, sensitive)
 
@@ -85,6 +86,7 @@ class OperationScanner {
                 checkId = "op-bfla",
                 owaspId = "API5:2023",
                 location = loc,
+                affectedOperation = "${op.parentTypeName}.${op.field.name}",
             )
         }
 
@@ -104,6 +106,7 @@ class OperationScanner {
                     checkId = "op-field-authz",
                     owaspId = "API3:2023",
                     location = loc,
+                    affectedOperation = "${op.parentTypeName}.${op.field.name}",
                 )
             }
         }
@@ -122,6 +125,7 @@ class OperationScanner {
                 checkId = "op-verbose-errors",
                 owaspId = "API8:2023",
                 location = loc,
+                affectedOperation = "${op.parentTypeName}.${op.field.name}",
             )
         }
 
@@ -167,6 +171,7 @@ class OperationScanner {
             checkId = "op-bola",
             owaspId = "API1:2023",
             location = loc,
+            affectedOperation = "${op.parentTypeName}.${op.field.name}",
         )
     }
 

@@ -23,4 +23,6 @@ data class Finding(
     val checkId: String = "",
     val owaspId: String = "",
     val location: String = "",
+    /** For operation-specific findings: the affected operation, as "Type.field" (null = endpoint-wide). */
+    val affectedOperation: String? = null,
 )

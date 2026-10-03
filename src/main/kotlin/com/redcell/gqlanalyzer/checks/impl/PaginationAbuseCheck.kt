@@ -57,6 +57,7 @@ class PaginationAbuseCheck : GraphQLCheck {
                     require pagination on list fields, and include list size in query-cost limits.
                 """.trimIndent(),
                 evidence = listOf(rr),
+                affectedOperation = "${schema.queryType()?.name ?: "Query"}.${target.name}",
             ),
         )
     }

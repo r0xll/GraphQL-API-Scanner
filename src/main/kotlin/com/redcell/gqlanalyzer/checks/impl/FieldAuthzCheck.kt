@@ -56,6 +56,7 @@ class FieldAuthzCheck : GraphQLCheck {
                         graph. Consider field-level `@auth` directives and schema review.
                     """.trimIndent(),
                     evidence = listOf(rr),
+                    affectedOperation = "${schema.queryType()?.name ?: "Query"}.${root.name}",
                 ),
             )
         }

@@ -39,4 +39,29 @@ class FindingAuditIssueTest {
     fun `escape handles ampersands`() {
         assertEquals("a &amp;&amp; b", FindingAuditIssue.escape("a && b"))
     }
+
+    @Test
+    fun `base url appends affected operation when location has no fragment`() {
+        val f = finding.copy(affectedOperation = "Query.user")
+        assertEquals("https://target.example/graphql#Query.user", FindingAuditIssue.baseUrl(f))
+    }
+
+    @Test
+    fun `base url does not double-append when location already has a fragment`() {
+        val f = finding.copy(location = "https://t/graphql#QUERY.user", affectedOperation = "Query.user")
+        assertEquals("https://t/graphql#QUERY.user", FindingAuditIssue.baseUrl(f))
+    }
+
+    @Test
+    fun `detail html shows affected operation line when set`() {
+        val html = FindingAuditIssue.detailHtml(finding.copy(affectedOperation = "Mutation.updateUser"))
+        assertTrue(html.contains("Affected operation:"))
+        assertTrue(html.contains("Mutation.updateUser"))
+    }
+
+    @Test
+    fun `endpoint-wide finding has no affected-operation line and bare url`() {
+        assertTrue(!FindingAuditIssue.detailHtml(finding).contains("Affected operation"))
+        assertEquals("https://target.example/graphql", FindingAuditIssue.baseUrl(finding))
+    }
 }

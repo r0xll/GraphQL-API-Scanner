@@ -23,7 +23,7 @@ class OperationScannerTest {
 
         assertEquals(1, r.findings.size)
         assertEquals("op-bfla", r.findings[0].checkId)
-        assertTrue(r.findings[0].location.endsWith("#QUERY.adminUsers"))
+        assertTrue(r.findings[0].location.endsWith("#Query.adminUsers"))
         assertEquals(OperationStatus.RESOLVED, r.statuses[ops["QUERY.adminUsers"]!!])
     }
 
@@ -75,6 +75,6 @@ class OperationScannerTest {
         val body = """{"errors":[{"message":"NullPointerException at com.app.R.get(R.java:1)"}]}"""
         val (ctx, _) = MockContext.build(listOf(rsp(body)), schema = schema)
         val r = OperationScanner().scan(ctx, listOf(ops["QUERY.me"]!!))
-        assertTrue(r.findings.any { it.checkId == "op-verbose-errors" && it.location.endsWith("#QUERY.me") })
+        assertTrue(r.findings.any { it.checkId == "op-verbose-errors" && it.location.endsWith("#Query.me") })
     }
 }

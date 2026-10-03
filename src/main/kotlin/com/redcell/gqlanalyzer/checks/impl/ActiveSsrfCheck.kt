@@ -46,6 +46,7 @@ class ActiveSsrfCheck(
             }
         }
 
+        val url = runCatching { ctx.request.url() }.getOrNull().orEmpty()
         val fired = OobScanner(oob, pollAttempts, pollDelayMs).run(targets)
         return fired.map { (label, evidence) ->
             Finding(
@@ -69,6 +70,8 @@ class ActiveSsrfCheck(
                     server-side fetches. Prefer an egress proxy with an explicit allow-list.
                 """.trimIndent(),
                 evidence = listOf(evidence),
+                affectedOperation = label,
+                location = if (url.isEmpty()) "" else "$url#$label",
             )
         }
     }

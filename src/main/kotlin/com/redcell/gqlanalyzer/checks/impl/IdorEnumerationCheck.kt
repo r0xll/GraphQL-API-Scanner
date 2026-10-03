@@ -59,6 +59,7 @@ class IdorEnumerationCheck : GraphQLCheck {
                     the requested id) and prefer unguessable identifiers (UUIDv4) over sequential ids.
                 """.trimIndent(),
                 evidence = listOf(rr1, rr2),
+                affectedOperation = "${schema.queryType()?.name ?: "Query"}.${field.name}",
             ),
         )
     }

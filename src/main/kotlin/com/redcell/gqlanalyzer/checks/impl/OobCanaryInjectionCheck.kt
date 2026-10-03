@@ -47,6 +47,7 @@ class OobCanaryInjectionCheck(
             }
         }
 
+        val url = runCatching { ctx.request.url() }.getOrNull().orEmpty()
         val fired = OobScanner(oob, pollAttempts, pollDelayMs).run(targets)
         return fired.map { (label, evidence) ->
             Finding(
@@ -68,6 +69,8 @@ class OobCanaryInjectionCheck(
                     entity resolution; and apply the SSRF egress controls above to every outbound call.
                 """.trimIndent(),
                 evidence = listOf(evidence),
+                affectedOperation = label,
+                location = if (url.isEmpty()) "" else "$url#$label",
             )
         }
     }

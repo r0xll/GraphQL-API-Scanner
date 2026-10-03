@@ -60,6 +60,7 @@ class UserEnumerationCheck : GraphQLCheck {
                     and apply the same rate limiting to valid and invalid identifiers.
                 """.trimIndent(),
                 evidence = listOf(rrValid, rrInvalid),
+                affectedOperation = "${if (schema.mutations().any { it.name == field.name }) schema.mutationTypeName ?: "Mutation" else schema.queryTypeName ?: "Query"}.${field.name}",
             ),
         )
     }
