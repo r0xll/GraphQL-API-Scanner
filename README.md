@@ -81,6 +81,18 @@ On load the Output tab logs:
 | Fragment-cycle detection | API4:2023 | self-spreading fragment accepted (missing cycle guard) |
 | Unbounded pagination | API4:2023 | `first/limit:1000000` accepted with no cap |
 | Field duplication | API4:2023 | field repeated ×10 accepted (proof-capped) |
+| Confirmed SSRF (OOB) | API7:2023 | Collaborator URL in a URL-arg fires out-of-band |
+| OOB canary injection | API7:2023 | Collaborator URL in any string arg fires out-of-band |
+
+## Active out-of-band checks (Burp Collaborator)
+
+The SSRF/OOB checks (`active-ssrf`, `oob-canary-injection`) confirm findings via Burp
+Collaborator: they inject a unique Collaborator URL into read-only root-query string
+arguments and report only those that produce a real out-of-band interaction. They
+**no-op unless Collaborator is available**, target query-root fields only (never fire a
+mutation), use canary URLs only (non-destructive), and poll briefly for interactions —
+so an Enumerate run with Collaborator enabled takes a little longer. This confirmation
+step is the extension's key differentiator over static GraphQL scanners.
 
 ## Stack
 

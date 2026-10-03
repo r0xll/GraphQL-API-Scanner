@@ -35,6 +35,19 @@ object QueryBuilder {
     fun bareFieldQuery(schema: SchemaModel, field: GqlField): String =
         "{ ${field.name}${selectionFor(schema, field)} }"
 
+    /**
+     * A root query injecting [value] into [argName], filling any other required args
+     * with typed placeholders. Used by active OOB checks to place a Collaborator
+     * hostname into a specific argument.
+     */
+    fun injectedQuery(schema: SchemaModel, field: GqlField, argName: String, value: String): String {
+        val others = field.args
+            .filter { it.typeRef.isNonNull() && it.name != argName }
+            .joinToString("") { "${it.name}: ${placeholderFor(schema, it.typeRef)}, " }
+        val args = "$others$argName: ${literal(value)}"
+        return "query { ${field.name}($args)${selectionFor(schema, field)} }"
+    }
+
     /** `{ root { leaf1 leaf2 ... } }` */
     fun selectLeaves(root: GqlField, leaves: List<String>): String =
         "{ ${root.name} { ${leaves.joinToString(" ")} } }"

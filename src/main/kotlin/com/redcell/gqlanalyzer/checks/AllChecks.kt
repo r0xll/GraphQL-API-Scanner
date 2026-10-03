@@ -1,5 +1,6 @@
 package com.redcell.gqlanalyzer.checks
 
+import com.redcell.gqlanalyzer.checks.impl.ActiveSsrfCheck
 import com.redcell.gqlanalyzer.checks.impl.AltIntrospectionCheck
 import com.redcell.gqlanalyzer.checks.impl.ApqDetectionCheck
 import com.redcell.gqlanalyzer.checks.impl.BatchingCheck
@@ -20,6 +21,7 @@ import com.redcell.gqlanalyzer.checks.impl.GraphiqlExposedCheck
 import com.redcell.gqlanalyzer.checks.impl.InjectionSeederCheck
 import com.redcell.gqlanalyzer.checks.impl.IntrospectionCheck
 import com.redcell.gqlanalyzer.checks.impl.MassAssignmentCheck
+import com.redcell.gqlanalyzer.checks.impl.OobCanaryInjectionCheck
 import com.redcell.gqlanalyzer.checks.impl.PaginationAbuseCheck
 import com.redcell.gqlanalyzer.checks.impl.SsrfSeederCheck
 import com.redcell.gqlanalyzer.checks.impl.TracingExtensionsCheck
@@ -57,5 +59,8 @@ object AllChecks {
         CircularFragmentCheck(),
         PaginationAbuseCheck(),
         FieldDuplicationCheck(),
+        // v0.6.0 — active out-of-band confirmation (Burp Collaborator)
+        ActiveSsrfCheck(),
+        OobCanaryInjectionCheck(),
     )
 }
