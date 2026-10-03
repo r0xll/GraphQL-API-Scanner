@@ -24,11 +24,13 @@ object Introspection {
               fields(includeDeprecated: true) {
                 name
                 description
+                isDeprecated
+                deprecationReason
                 args { name description defaultValue type { ...TypeRef } }
                 type { ...TypeRef }
               }
               inputFields { name description defaultValue type { ...TypeRef } }
-              enumValues(includeDeprecated: true) { name }
+              enumValues(includeDeprecated: true) { name isDeprecated deprecationReason }
             }
           }
         }
@@ -75,6 +77,8 @@ data class FullTypeDef(
 data class FieldDef(
     val name: String,
     val description: String? = null,
+    val isDeprecated: Boolean = false,
+    val deprecationReason: String? = null,
     val args: List<InputValueDef> = emptyList(),
     val type: TypeRefDef,
 )
@@ -140,6 +144,8 @@ object IntrospectionParser {
         typeRef = type.toModel(),
         args = args.map { it.toModel() },
         description = description,
+        isDeprecated = isDeprecated,
+        deprecationReason = deprecationReason,
     )
 
     private fun InputValueDef.toModel() = GqlInputValue(

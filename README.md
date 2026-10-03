@@ -72,6 +72,12 @@ On load the Output tab logs:
 | GraphQL IDE exposed in prod | API8:2023 | GET detects GraphiQL/Playground/Altair |
 | Content-Type CORS bypass | API8:2023 | `{__typename}` as `text/plain` (simple request, no preflight) |
 | Directive overloading | API4:2023 | 10 repeated `@skip` directives accepted (proof-capped) |
+| Engine fingerprinting | API9:2023 | graphw00f-style engine ID from error signatures |
+| Alternate introspection | API9:2023 | schema leaks via GET / text-plain / `__type` when POST blocked |
+| APQ enabled | API9:2023 | Automatic Persisted Queries detected (`PersistedQueryNotFound`) |
+| Tracing/perf extensions | API8:2023 | `extensions.tracing`/`apollo` leaked to clients |
+| Incremental delivery | API9:2023 | `@defer`/`@stream` supported (recon + DoS lever) |
+| Deprecated-field inventory | API9:2023 | schema-static list of deprecated fields |
 
 ## Stack
 

@@ -101,6 +101,13 @@ object GraphQLHttp {
         }
     }
 
+    /** Top-level `extensions` object keys (e.g. tracing/apollo), empty when absent. */
+    fun extensionsKeys(responseBody: String): Set<String> {
+        val root = runCatching { json.parseToJsonElement(responseBody) }.getOrNull() as? JsonObject ?: return emptySet()
+        val ext = root["extensions"] as? JsonObject ?: return emptySet()
+        return ext.keys
+    }
+
     /** True if the body is a JSON object carrying a non-null top-level "data". */
     fun hasData(responseBody: String): Boolean {
         val root = runCatching { json.parseToJsonElement(responseBody) }.getOrNull() as? JsonObject ?: return false

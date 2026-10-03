@@ -50,6 +50,8 @@ data class GqlField(
     val typeRef: GqlTypeRef,
     val args: List<GqlInputValue> = emptyList(),
     val description: String? = null,
+    val isDeprecated: Boolean = false,
+    val deprecationReason: String? = null,
 )
 
 data class GqlInputValue(
