@@ -77,4 +77,30 @@ class OperationScannerTest {
         val r = OperationScanner().scan(ctx, listOf(ops["QUERY.me"]!!))
         assertTrue(r.findings.any { it.checkId == "op-verbose-errors" && it.location.endsWith("#Query.me") })
     }
+
+    @Test
+    fun `scan records the final probe per operation`() {
+        val body = """{"data":{"adminUsers":{"__typename":"User"}}}"""
+        val op = ops["QUERY.adminUsers"]!!
+        val (ctx, _) = MockContext.build(listOf(rsp(body)), schema = schema)
+        val r = OperationScanner().scan(ctx, listOf(op))
+
+        val probe = r.probes[op]
+        assertTrue(probe != null)
+        assertEquals(body, probe!!.body)
+    }
+
+    @Test
+    fun `scoreOperation matches a full scan for the same response`() {
+        val body = """{"data":{"adminUsers":{"__typename":"User"}}}"""
+        val op = ops["QUERY.adminUsers"]!!
+        val (ctx, _) = MockContext.build(listOf(rsp(body)), schema = schema)
+        val rr = rsp(body)
+
+        val (status, findings) = OperationScanner().scoreOperation(ctx, op, rr, body)
+        assertEquals(OperationStatus.RESOLVED, status)
+        assertEquals(1, findings.size)
+        assertEquals("op-bfla", findings[0].checkId)
+        assertTrue(findings[0].location.endsWith("#Query.adminUsers"))
+    }
 }

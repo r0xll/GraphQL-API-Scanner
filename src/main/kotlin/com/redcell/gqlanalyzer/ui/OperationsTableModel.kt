@@ -43,6 +43,9 @@ class OperationsTableModel : AbstractTableModel() {
 
     fun rowFor(operation: Operation): Row? = rows.firstOrNull { it.operation == operation }
 
+    /** The operation backing a (model) row index, or null if out of range. */
+    fun operationAt(index: Int): Operation? = rows.getOrNull(index)?.operation
+
     /** Apply scan results: set each operation's status and increment its finding count. */
     fun applyStatuses(statuses: Map<Operation, OperationStatus>, findingsPerOp: Map<Operation, Int>) {
         rows.forEach { row ->

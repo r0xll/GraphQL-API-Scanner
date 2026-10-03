@@ -32,19 +32,30 @@ object GraphQLHttp {
     fun batchEnvelope(queries: List<String>): String =
         "[" + queries.joinToString(",") { queryEnvelope(it) } + "]"
 
+    /**
+     * Build (but do not send) a POST of the given JSON body as application/json on the
+     * base request's service. Exposed so the UI can seed an editor with the exact request
+     * the scanner would send.
+     */
+    fun buildJsonRequest(
+        base: HttpRequest,
+        body: String,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): HttpRequest {
+        var req = base.withMethod("POST")
+            .withBody(body)
+            .withUpdatedHeader("Content-Type", "application/json")
+        for ((k, v) in extraHeaders) req = req.withUpdatedHeader(k, v)
+        return req
+    }
+
     /** POST the given JSON body as application/json on the base request's service. */
     fun postJson(
         api: MontoyaApi,
         base: HttpRequest,
         body: String,
         extraHeaders: Map<String, String> = emptyMap(),
-    ): HttpRequestResponse {
-        var req = base.withMethod("POST")
-            .withBody(body)
-            .withUpdatedHeader("Content-Type", "application/json")
-        for ((k, v) in extraHeaders) req = req.withUpdatedHeader(k, v)
-        return api.http().sendRequest(req)
-    }
+    ): HttpRequestResponse = api.http().sendRequest(buildJsonRequest(base, body, extraHeaders))
 
     /** Send an arbitrary already-built request. */
     fun send(api: MontoyaApi, req: HttpRequest): HttpRequestResponse = api.http().sendRequest(req)

@@ -31,30 +31,52 @@ class OperationScanner(
     data class ScanResult(
         val statuses: Map<Operation, OperationStatus>,
         val findings: List<Finding>,
+        /** The final (post-adaptive) request/response per operation, for seeding the editor. */
+        val probes: Map<Operation, OpProbe> = emptyMap(),
     )
+
+    /** The exact request/response the scanner last sent for an operation. */
+    data class OpProbe(val requestResponse: HttpRequestResponse, val body: String)
 
     fun scan(ctx: CheckContext, operations: List<Operation>): ScanResult {
         val schema = ctx.schema
-        val baseUrl = runCatching { ctx.request.url() }.getOrNull().orEmpty()
         val statuses = LinkedHashMap<Operation, OperationStatus>()
         val findings = mutableListOf<Finding>()
+        val probes = LinkedHashMap<Operation, OpProbe>()
 
         for (op in operations) {
-            val opLabel = "${op.parentTypeName}.${op.field.name}"
-            val loc = if (baseUrl.isEmpty()) opLabel else "$baseUrl#$opLabel"
             val sensitive = if (schema != null) sensitiveLeaves(schema, op) else emptyList()
-
             val probe = adaptiveProbe(ctx, schema, op, sensitive)
-            val rr = probe.rr
-            val body = probe.body
-            val status = classify(body, op.field.name, rr.response()?.statusCode()?.toInt() ?: 0)
-            statuses[op] = status
+            probes[op] = OpProbe(probe.rr, probe.body)
 
-            findings += operationFindings(ctx, op, loc, body, rr, sensitive)
+            val (status, opFindings) = scoreOperation(ctx, op, probe.rr, probe.body, sensitive)
+            statuses[op] = status
+            findings += opFindings
         }
 
         // Per-operation locations keep issues distinct; dedupe like CheckEngine.
-        return ScanResult(statuses, findings.distinctBy { it.checkId to it.location })
+        return ScanResult(statuses, findings.distinctBy { it.checkId to it.location }, probes)
+    }
+
+    /**
+     * Classify a single operation from an already-obtained response and run its
+     * per-operation analyzers. Used by both the batch [scan] and the editor re-test.
+     * [body] defaults to the response body of [rr] so callers that only have the
+     * request/response (e.g. an edited manual re-send) need not extract it.
+     */
+    fun scoreOperation(
+        ctx: CheckContext,
+        op: Operation,
+        rr: HttpRequestResponse,
+        body: String = rr.response()?.bodyToString().orEmpty(),
+        sensitive: List<String> = ctx.schema?.let { sensitiveLeaves(it, op) } ?: emptyList(),
+    ): Pair<OperationStatus, List<Finding>> {
+        val baseUrl = runCatching { ctx.request.url() }.getOrNull().orEmpty()
+        val opLabel = "${op.parentTypeName}.${op.field.name}"
+        val loc = if (baseUrl.isEmpty()) opLabel else "$baseUrl#$opLabel"
+        val status = classify(body, op.field.name, rr.response()?.statusCode()?.toInt() ?: 0)
+        val findings = operationFindings(ctx, op, loc, body, rr, sensitive)
+        return status to findings
     }
 
     private data class Probe(val rr: HttpRequestResponse, val body: String)

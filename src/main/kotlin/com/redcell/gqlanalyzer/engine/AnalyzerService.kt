@@ -80,4 +80,29 @@ class AnalyzerService(
         val ctx = CheckContext(api, base, schema, config)
         return operationScanner.scan(ctx, operations)
     }
+
+    data class RerunResult(
+        val status: com.redcell.gqlanalyzer.model.OperationStatus,
+        val findings: List<Finding>,
+        val requestResponse: burp.api.montoya.http.message.HttpRequestResponse,
+    )
+
+    /**
+     * Re-send one operator-edited request verbatim and re-score the operation. This is a
+     * manual, operator-driven send (the Repeater-equivalent gate): the request is sent
+     * exactly as edited, so a mutation only goes out because the operator opened the editor
+     * and clicked Send. The edited request also becomes the scanner's base so the per-op
+     * location/evidence line up.
+     */
+    fun rerunOperation(
+        editedRequest: HttpRequest,
+        config: CheckConfig,
+        schema: SchemaModel?,
+        operation: Operation,
+    ): RerunResult {
+        val rr = api.http().sendRequest(editedRequest)
+        val ctx = CheckContext(api, editedRequest, schema, config)
+        val (status, findings) = operationScanner.scoreOperation(ctx, operation, rr)
+        return RerunResult(status, findings, rr)
+    }
 }

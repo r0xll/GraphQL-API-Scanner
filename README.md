@@ -58,7 +58,13 @@ On load the Output tab logs:
    Burp's site map as an `AuditIssue` with evidence. Per-operation findings cover BOLA
    (API1), BFLA (API5), sensitive-field exposure (API3), and verbose errors (API8),
    tagged `url#QUERY.fieldName`.
-5. **Two-identity checks (BOLA/BFLA)** — in each target's **Config** sub-tab, supply
+5. **Edit & re-test an operation** — double-click any row in the Operations grid (handy for
+   ones stuck at **INVALID_INPUT**/**ERROR**) to open a Repeater-style editor: it shows the exact
+   request the scanner sent and the API's response. Edit the request — query, variables, or
+   headers — click **Send** to re-run just that operation, read the new response, and **Apply to
+   grid** to push the re-scored status and any findings back. The request is sent only when you
+   click Send (the write gate), so a mutation goes out only on your explicit action.
+6. **Two-identity checks (BOLA/BFLA)** — in each target's **Config** sub-tab, supply
    two identities (one `Header: value` per line) and, for a firm BOLA proof, a known
    object id owned by identity A. These checks are skipped unless configured — no creds
    are ever hardcoded.

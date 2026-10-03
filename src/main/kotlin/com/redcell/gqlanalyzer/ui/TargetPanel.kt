@@ -3,12 +3,15 @@ package com.redcell.gqlanalyzer.ui
 import burp.api.montoya.MontoyaApi
 import burp.api.montoya.http.message.requests.HttpRequest
 import com.redcell.gqlanalyzer.engine.AnalyzerService
+import com.redcell.gqlanalyzer.engine.OperationScanner
 import com.redcell.gqlanalyzer.model.CheckConfig
 import com.redcell.gqlanalyzer.model.Finding
 import com.redcell.gqlanalyzer.model.Operation
 import com.redcell.gqlanalyzer.schema.SchemaFileLoader
 import com.redcell.gqlanalyzer.schema.SchemaModel
 import com.redcell.gqlanalyzer.scanner.FindingAuditIssue
+import com.redcell.gqlanalyzer.transport.GraphQLHttp
+import com.redcell.gqlanalyzer.transport.QueryBuilder
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
@@ -41,6 +44,7 @@ class TargetPanel(
     private val service: AnalyzerService,
 ) {
     @Volatile private var schema: SchemaModel? = null
+    @Volatile private var lastScan: OperationScanner.ScanResult? = null
     private val findings = mutableListOf<Finding>()
 
     private val statusLabel = JLabel(" ")
@@ -76,6 +80,7 @@ class TargetPanel(
         loadSchemaButton.addActionListener { loadSchemaFile() }
         scanButton.addActionListener { scanSelected() }
         installSelectAllHeaderToggle()
+        installOperationEditor()
         return root
     }
 
@@ -152,6 +157,59 @@ class TargetPanel(
                 }
             }
         })
+    }
+
+    /** Double-clicking an operation opens a Repeater-style editor to view/edit/re-send it. */
+    private fun installOperationEditor() {
+        operationsTable.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount < 2) return
+                val viewRow = operationsTable.rowAtPoint(e.point)
+                if (viewRow < 0) return
+                val op = operationsModel.operationAt(operationsTable.convertRowIndexToModel(viewRow)) ?: return
+                openOperationEditor(op)
+            }
+        })
+    }
+
+    /** Seed the editor from the last scan's probe for [op], or build a fresh request. */
+    private fun openOperationEditor(op: Operation) {
+        val config = readConfig()
+        val probe = lastScan?.probes?.get(op)
+        val seedRequest = probe?.requestResponse?.request() ?: freshRequestFor(op, config)
+        val seedResponse = probe?.requestResponse?.response()
+        OperationEditorDialog(
+            api = api,
+            service = service,
+            op = op,
+            schema = schema,
+            config = config,
+            seedRequest = seedRequest,
+            seedResponse = seedResponse,
+            onApply = { status, newFindings -> applyRetest(op, status, newFindings) },
+        ).show(component)
+    }
+
+    /** The request the scanner would send for [op] (used when it was never scanned). */
+    private fun freshRequestFor(op: Operation, config: CheckConfig): burp.api.montoya.http.message.requests.HttpRequest {
+        val snapshot = schema
+        val doc = if (snapshot != null) {
+            QueryBuilder.operationDocument(snapshot, op)
+        } else {
+            "query { ${op.field.name} }"
+        }
+        return GraphQLHttp.buildJsonRequest(base, GraphQLHttp.queryEnvelope(doc), config.authHeadersA)
+    }
+
+    /** Push a re-tested operation's status/findings back into the grid, findings table, and site map. */
+    private fun applyRetest(op: Operation, status: com.redcell.gqlanalyzer.model.OperationStatus, newFindings: List<Finding>) {
+        operationsModel.applyStatuses(mapOf(op to status), mapOf(op to newFindings.size))
+        if (newFindings.isNotEmpty()) {
+            findings.addAll(newFindings)
+            findingsModel.setFindings(findings.toList())
+            newFindings.forEach { api.siteMap().add(FindingAuditIssue.toAuditIssue(it)) }
+        }
+        statusLabel.text = "Re-tested ${op.parentTypeName}.${op.field.name}: ${status.name}, ${newFindings.size} finding(s)."
     }
 
     private fun targetLabel(): String = runCatching { base.url() }.getOrDefault(base.path())
@@ -243,6 +301,7 @@ class TargetPanel(
                 enumerateButton.isEnabled = true
                 res.onFailure { statusLabel.text = "Error: ${it.message}" }
                     .onSuccess { r ->
+                        lastScan = r
                         findings.addAll(r.findings)
                         findingsModel.setFindings(findings.toList())
                         r.findings.forEach { api.siteMap().add(FindingAuditIssue.toAuditIssue(it)) }

@@ -52,6 +52,35 @@ class AnalyzerServiceTest {
     }
 
     @Test
+    fun `rerunOperation sends the edited request and rescores the operation`() {
+        val schema = com.redcell.gqlanalyzer.checks.SchemaFixtures.full()
+        val op = OperationEnumerator.enumerate(schema).first { it.name == "QUERY.adminUsers" }
+        val body = """{"data":{"adminUsers":{"__typename":"User"}}}"""
+
+        val resp = mockk<burp.api.montoya.http.message.responses.HttpResponse>()
+        every { resp.statusCode() } returns 200
+        every { resp.bodyToString() } returns body
+        val rr = mockk<burp.api.montoya.http.message.HttpRequestResponse>()
+        every { rr.response() } returns resp
+
+        val edited = mockk<HttpRequest>()
+        every { edited.url() } returns "https://target.example/graphql"
+
+        val http = mockk<burp.api.montoya.http.Http>()
+        every { http.sendRequest(edited) } returns rr
+        val api = mockk<MontoyaApi>(relaxed = true)
+        every { api.http() } returns http
+
+        val svc = AnalyzerService(api, CheckEngine(emptyList()), mockk())
+        val result = svc.rerunOperation(edited, CheckConfig(), schema, op)
+
+        io.mockk.verify(exactly = 1) { http.sendRequest(edited) } // sent verbatim, once
+        assertEquals(com.redcell.gqlanalyzer.model.OperationStatus.RESOLVED, result.status)
+        assertTrue(result.findings.any { it.checkId == "op-bfla" })
+        assertSame(rr, result.requestResponse)
+    }
+
+    @Test
     fun `enumerateWithProvidedSchema uses the given schema and runs endpoint checks without introspecting`() {
         val provided = com.redcell.gqlanalyzer.checks.SchemaFixtures.full()
         val intro = mockk<IntrospectionRunner>() // must NOT be called
