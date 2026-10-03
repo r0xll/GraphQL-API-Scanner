@@ -78,6 +78,9 @@ On load the Output tab logs:
 | Tracing/perf extensions | API8:2023 | `extensions.tracing`/`apollo` leaked to clients |
 | Incremental delivery | API9:2023 | `@defer`/`@stream` supported (recon + DoS lever) |
 | Deprecated-field inventory | API9:2023 | schema-static list of deprecated fields |
+| Fragment-cycle detection | API4:2023 | self-spreading fragment accepted (missing cycle guard) |
+| Unbounded pagination | API4:2023 | `first/limit:1000000` accepted with no cap |
+| Field duplication | API4:2023 | field repeated ×10 accepted (proof-capped) |
 
 ## Stack
 

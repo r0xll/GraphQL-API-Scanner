@@ -149,4 +149,25 @@ object Heuristics {
         if (!body.contains("<", ignoreCase = false)) return false // not HTML
         return IDE_MARKERS.any { it.containsMatchIn(body) }
     }
+
+    // ---- DoS: pagination (API4) ----
+
+    /** Argument names that cap list size; a missing server-side limit is a DoS lever. */
+    val PAGINATION_ARG = setOf("first", "last", "limit", "count", "pagesize", "perpage", "take", "size", "max")
+
+    fun isPaginationArg(name: String) = norm(name) in PAGINATION_ARG
+
+    private val LIMIT_ERROR = Regex(
+        """(?i)(too (many|large)|exceeds?( the)? maximum|must be (less|at most)|limit of \d+|maximum (of |value )?\d+|page size|exceeds limit)""",
+    )
+
+    /** Server rejected an oversized request with a limit/cap error. */
+    fun containsLimitError(body: String) = LIMIT_ERROR.containsMatchIn(body)
+
+    /** Validation error indicating fragment-cycle detection (the server is protected). */
+    private val FRAGMENT_CYCLE = Regex(
+        """(?i)(cannot spread fragment|fragment .* cycle|fragment cycle|spread itself|circular (fragment|reference))""",
+    )
+
+    fun containsFragmentCycleError(body: String) = FRAGMENT_CYCLE.containsMatchIn(body)
 }
