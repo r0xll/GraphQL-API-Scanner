@@ -83,6 +83,10 @@ On load the Output tab logs:
 | Field duplication | API4:2023 | field repeated ×10 accepted (proof-capped) |
 | Confirmed SSRF (OOB) | API7:2023 | Collaborator URL in a URL-arg fires out-of-band |
 | OOB canary injection | API7:2023 | Collaborator URL in any string arg fires out-of-band |
+| IDOR / object enumeration | API1:2023 | adjacent ids both resolve to distinct objects |
+| Auth brute-force amplification | API2:2023 | schema-static: batchable auth operations (rate-limit bypass) |
+| CORS misconfiguration | API8:2023 | reflected Origin + credentials (credentialed cross-origin read) |
+| BFLA (per-operation, incl. mutations) | API5:2023 | privileged op resolves for the low-priv identity (operation scan) |
 
 ## Active out-of-band checks (Burp Collaborator)
 

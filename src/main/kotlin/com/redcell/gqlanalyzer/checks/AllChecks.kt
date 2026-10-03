@@ -3,11 +3,13 @@ package com.redcell.gqlanalyzer.checks
 import com.redcell.gqlanalyzer.checks.impl.ActiveSsrfCheck
 import com.redcell.gqlanalyzer.checks.impl.AltIntrospectionCheck
 import com.redcell.gqlanalyzer.checks.impl.ApqDetectionCheck
+import com.redcell.gqlanalyzer.checks.impl.AuthAmplificationCheck
 import com.redcell.gqlanalyzer.checks.impl.BatchingCheck
 import com.redcell.gqlanalyzer.checks.impl.BflaCheck
 import com.redcell.gqlanalyzer.checks.impl.BolaCheck
 import com.redcell.gqlanalyzer.checks.impl.CircularFragmentCheck
 import com.redcell.gqlanalyzer.checks.impl.ContentTypeBypassCheck
+import com.redcell.gqlanalyzer.checks.impl.CorsCheck
 import com.redcell.gqlanalyzer.checks.impl.CsrfCheck
 import com.redcell.gqlanalyzer.checks.impl.DeferStreamCheck
 import com.redcell.gqlanalyzer.checks.impl.DeprecatedFieldInventoryCheck
@@ -18,6 +20,7 @@ import com.redcell.gqlanalyzer.checks.impl.FieldAuthzCheck
 import com.redcell.gqlanalyzer.checks.impl.FieldDuplicationCheck
 import com.redcell.gqlanalyzer.checks.impl.FieldSuggestionCheck
 import com.redcell.gqlanalyzer.checks.impl.GraphiqlExposedCheck
+import com.redcell.gqlanalyzer.checks.impl.IdorEnumerationCheck
 import com.redcell.gqlanalyzer.checks.impl.InjectionSeederCheck
 import com.redcell.gqlanalyzer.checks.impl.IntrospectionCheck
 import com.redcell.gqlanalyzer.checks.impl.MassAssignmentCheck
@@ -62,5 +65,9 @@ object AllChecks {
         // v0.6.0 — active out-of-band confirmation (Burp Collaborator)
         ActiveSsrfCheck(),
         OobCanaryInjectionCheck(),
+        // v0.7.0 — auth & deeper authz
+        IdorEnumerationCheck(),
+        AuthAmplificationCheck(),
+        CorsCheck(),
     )
 }

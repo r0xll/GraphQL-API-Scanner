@@ -170,4 +170,29 @@ object Heuristics {
     )
 
     fun containsFragmentCycleError(body: String) = FRAGMENT_CYCLE.containsMatchIn(body)
+
+    // ---- authentication (API2) ----
+
+    /** Field names that perform authentication-sensitive operations (rate-limit targets). */
+    val AUTH_FIELD = setOf(
+        "login", "signin", "authenticate", "auth", "token", "accesstoken", "refreshtoken",
+        "signup", "register", "verifyotp", "verify", "verifyemail", "resetpassword",
+        "forgotpassword", "changepassword", "updatepassword", "mfa", "totp", "otp", "verifymfa",
+    )
+
+    fun isAuthField(name: String) = norm(name) in AUTH_FIELD
+
+    // ---- CORS misconfiguration (API8) ----
+
+    /**
+     * True when the server reflects an arbitrary [testOrigin] (or `*`) in
+     * Access-Control-Allow-Origin together with credentials:true — a credentialed
+     * cross-origin read primitive.
+     */
+    fun corsMisconfig(acao: String?, acac: String?, testOrigin: String): Boolean {
+        if (acao == null) return false
+        val reflects = acao.trim() == testOrigin || acao.trim() == "*"
+        val creds = acac?.trim().equals("true", ignoreCase = true)
+        return reflects && creds
+    }
 }

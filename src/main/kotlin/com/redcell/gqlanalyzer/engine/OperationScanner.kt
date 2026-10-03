@@ -69,13 +69,15 @@ class OperationScanner {
         val out = mutableListOf<Finding>()
         val field = op.field.name
 
-        // BFLA (API5): privileged-named operation authorized for identity A.
+        // BFLA (API5): privileged-named operation authorized for identity A (query or mutation).
         if (Heuristics.isPrivilegedField(field) && BflaCheck.authorized(body, field)) {
+            val mut = op.kind == com.redcell.gqlanalyzer.model.OperationKind.MUTATION
             out += Finding(
-                name = "BFLA: privileged operation '$field' authorized",
-                detail = "The privileged-looking operation `$field` returned data with no authorization " +
-                    "error for the configured identity. Confirm that identity is unprivileged for it.\n\n" +
-                    "CVSS v3.1: AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N (6.5, Medium).",
+                name = "BFLA: privileged ${op.kind.name.lowercase()} '$field' authorized",
+                detail = "The privileged-looking ${op.kind.name.lowercase()} `$field` returned data with no " +
+                    "authorization error for the configured identity. Confirm that identity is unprivileged for it." +
+                    (if (mut) " As a mutation, this is a privileged state-changing function reachable by a lower-privilege caller." else "") +
+                    "\n\nCVSS v3.1: AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:${if (mut) "H" else "N"}/A:N (${if (mut) "8.1, High" else "6.5, Medium"}).",
                 severity = Severity.HIGH,
                 confidence = Confidence.FIRM,
                 remediation = "Enforce function-level authorization server-side (deny-by-default).",
