@@ -87,6 +87,9 @@ On load the Output tab logs:
 | Auth brute-force amplification | API2:2023 | schema-static: batchable auth operations (rate-limit bypass) |
 | CORS misconfiguration | API8:2023 | reflected Origin + credentials (credentialed cross-origin read) |
 | BFLA (per-operation, incl. mutations) | API5:2023 | privileged op resolves for the low-priv identity (operation scan) |
+| Sensitive business flows | API6:2023 | schema-static: high-value mutations flagged for manual review |
+| User enumeration | API2:2023 | config-gated: valid vs invalid identifier login differential |
+| CSWSH (subscriptions) | API8:2023 | cross-origin WebSocket handshake accepted |
 
 ## Active out-of-band checks (Burp Collaborator)
 

@@ -182,6 +182,27 @@ object Heuristics {
 
     fun isAuthField(name: String) = norm(name) in AUTH_FIELD
 
+    /** Arg names that carry a user identifier (for user-enumeration probing). */
+    val IDENTIFIER_ARG = setOf("username", "email", "user", "login", "identifier", "account", "emailaddress", "handle")
+
+    fun isIdentifierArg(name: String) = norm(name) in IDENTIFIER_ARG
+
+    // ---- business-critical flows (API6) ----
+
+    /** Mutation names that drive sensitive business flows warranting manual review. */
+    val SENSITIVE_FLOW = setOf(
+        "purchase", "buy", "checkout", "order", "placeorder", "pay", "payment", "transfer",
+        "withdraw", "deposit", "refund", "payout", "charge", "wire", "redeem", "invite",
+        "grant", "promote", "approve", "subscribe", "unsubscribe", "cancel", "delete",
+        "remove", "sendmoney", "sendinvite", "addfunds", "changerole", "setrole", "impersonate",
+    )
+
+    // Prefix match so compound names (refundOrder, deleteUser, transferFunds) are caught.
+    fun isSensitiveFlow(name: String): Boolean {
+        val n = norm(name)
+        return SENSITIVE_FLOW.any { n == it || n.startsWith(it) }
+    }
+
     // ---- CORS misconfiguration (API8) ----
 
     /**

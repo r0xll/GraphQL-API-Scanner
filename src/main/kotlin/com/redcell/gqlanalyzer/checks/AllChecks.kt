@@ -11,6 +11,7 @@ import com.redcell.gqlanalyzer.checks.impl.CircularFragmentCheck
 import com.redcell.gqlanalyzer.checks.impl.ContentTypeBypassCheck
 import com.redcell.gqlanalyzer.checks.impl.CorsCheck
 import com.redcell.gqlanalyzer.checks.impl.CsrfCheck
+import com.redcell.gqlanalyzer.checks.impl.CswshCheck
 import com.redcell.gqlanalyzer.checks.impl.DeferStreamCheck
 import com.redcell.gqlanalyzer.checks.impl.DeprecatedFieldInventoryCheck
 import com.redcell.gqlanalyzer.checks.impl.DepthComplexityCheck
@@ -25,6 +26,8 @@ import com.redcell.gqlanalyzer.checks.impl.InjectionSeederCheck
 import com.redcell.gqlanalyzer.checks.impl.IntrospectionCheck
 import com.redcell.gqlanalyzer.checks.impl.MassAssignmentCheck
 import com.redcell.gqlanalyzer.checks.impl.OobCanaryInjectionCheck
+import com.redcell.gqlanalyzer.checks.impl.SensitiveFlowCheck
+import com.redcell.gqlanalyzer.checks.impl.UserEnumerationCheck
 import com.redcell.gqlanalyzer.checks.impl.PaginationAbuseCheck
 import com.redcell.gqlanalyzer.checks.impl.SsrfSeederCheck
 import com.redcell.gqlanalyzer.checks.impl.TracingExtensionsCheck
@@ -69,5 +72,9 @@ object AllChecks {
         IdorEnumerationCheck(),
         AuthAmplificationCheck(),
         CorsCheck(),
+        // v0.8.0 — API2/API6 breadth + CSWSH
+        SensitiveFlowCheck(),
+        UserEnumerationCheck(),
+        CswshCheck(),
     )
 }

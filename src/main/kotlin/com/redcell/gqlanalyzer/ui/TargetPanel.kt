@@ -48,6 +48,8 @@ class TargetPanel(
     private val identityA = JTextArea(3, 24)
     private val identityB = JTextArea(3, 24)
     private val knownIdField = JTextField(16)
+    private val userEnumValidField = JTextField(16)
+    private val userEnumInvalidField = JTextField(16)
 
     private val operationsModel = OperationsTableModel()
     private val operationsTable = JTable(operationsModel)
@@ -96,10 +98,16 @@ class TargetPanel(
         config.add(labeled("Identity B (attacker)", JScrollPane(identityB)))
         config.add(labeled("Known object id (A-owned)", knownIdField))
 
+        val enumRow = JPanel(GridLayout(1, 2, 8, 8))
+        enumRow.border = BorderFactory.createTitledBorder("User enumeration (optional) — enables the API2 login-differential probe")
+        enumRow.add(labeled("Valid identifier (existing user)", userEnumValidField))
+        enumRow.add(labeled("Invalid identifier (no such user)", userEnumInvalidField))
+
         val wrapper = JPanel(BorderLayout(8, 8))
         wrapper.add(config, BorderLayout.NORTH)
+        wrapper.add(enumRow, BorderLayout.CENTER)
         wrapper.add(
-            JLabel("Identities drive BOLA/BFLA (skipped unless set). Credentials are never stored outside this tab."),
+            JLabel("Identities drive BOLA/BFLA; user-enum fields drive API2. All optional, skipped unless set; never stored outside this tab."),
             BorderLayout.SOUTH,
         )
         return wrapper
@@ -147,6 +155,8 @@ class TargetPanel(
         authHeadersA = AnalyzerTab.parseHeaders(identityA.text),
         authHeadersB = AnalyzerTab.parseHeaders(identityB.text),
         knownObjectId = knownIdField.text.trim().ifEmpty { null },
+        userEnumValid = userEnumValidField.text.trim().ifEmpty { null },
+        userEnumInvalid = userEnumInvalidField.text.trim().ifEmpty { null },
     )
 
     /** Introspect, enumerate operations, and run endpoint-level checks. */

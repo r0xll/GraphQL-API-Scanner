@@ -19,8 +19,15 @@ data class CheckConfig(
     val knownObjectId: String? = null,
     /** Max nesting depth for the single depth-proof query. Never escalated. */
     val depthProof: Int = 10,
+    /** A known-valid identifier (username/email) for the user-enumeration probe. */
+    val userEnumValid: String? = null,
+    /** A known-invalid identifier for the user-enumeration probe. */
+    val userEnumInvalid: String? = null,
 ) {
     val hasTwoIdentities: Boolean get() = authHeadersA.isNotEmpty() && authHeadersB.isNotEmpty()
+
+    val hasUserEnumConfig: Boolean
+        get() = !userEnumValid.isNullOrBlank() && !userEnumInvalid.isNullOrBlank()
 }
 
 /**
