@@ -15,6 +15,7 @@ import com.redcell.gqlanalyzer.schema.SchemaModel
 import com.redcell.gqlanalyzer.transport.GraphQLHttp
 import com.redcell.gqlanalyzer.transport.GraphQLResponses
 import com.redcell.gqlanalyzer.transport.QueryBuilder
+import com.redcell.gqlanalyzer.transport.ScalarValues
 
 /**
  * Crawls the selected operations like a Burp API scan: one primary probe per
@@ -22,7 +23,10 @@ import com.redcell.gqlanalyzer.transport.QueryBuilder
  * and emitting per-operation findings. Mutations/subscriptions reach here only
  * because the operator selected them — selection is the write-safety gate.
  */
-class OperationScanner {
+class OperationScanner(
+    /** Bounded adaptive retries to satisfy scalar/input validation per operation (proof-level). */
+    private val maxInputRetries: Int = 3,
+) {
 
     data class ScanResult(
         val statuses: Map<Operation, OperationStatus>,
@@ -39,10 +43,10 @@ class OperationScanner {
             val opLabel = "${op.parentTypeName}.${op.field.name}"
             val loc = if (baseUrl.isEmpty()) opLabel else "$baseUrl#$opLabel"
             val sensitive = if (schema != null) sensitiveLeaves(schema, op) else emptyList()
-            val doc = buildDoc(schema, op, sensitive)
 
-            val rr = GraphQLHttp.postJson(ctx.api, ctx.request, GraphQLHttp.queryEnvelope(doc), ctx.config.authHeadersA)
-            val body = rr.response()?.bodyToString().orEmpty()
+            val probe = adaptiveProbe(ctx, schema, op, sensitive)
+            val rr = probe.rr
+            val body = probe.body
             val status = classify(body, op.field.name, rr.response()?.statusCode()?.toInt() ?: 0)
             statuses[op] = status
 
@@ -53,10 +57,50 @@ class OperationScanner {
         return ScanResult(statuses, findings.distinctBy { it.checkId to it.location })
     }
 
-    private fun buildDoc(schema: SchemaModel?, op: Operation, sensitive: List<String>): String {
+    private data class Probe(val rr: HttpRequestResponse, val body: String)
+
+    /**
+     * Send the operation, and while the server rejects a generated argument with a
+     * scalar/input coercion error, feed that error back in to synthesize a satisfying
+     * value and retry — bounded by [maxInputRetries], never a large loop.
+     */
+    private fun adaptiveProbe(ctx: CheckContext, schema: SchemaModel?, op: Operation, sensitive: List<String>): Probe {
+        var overrides = emptyMap<String, String>()
+        var rr = send(ctx, buildDoc(schema, op, sensitive, overrides))
+        var body = rr.response()?.bodyToString().orEmpty()
+
+        var tries = 0
+        while (schema != null && tries < maxInputRetries &&
+            Heuristics.isInputCoercionError(body) && !GraphQLHttp.hasData(body)
+        ) {
+            val fixes = coercionFixes(op, body)
+            if (fixes.isEmpty() || overrides.entries.containsAll(fixes.entries)) break // no new progress
+            overrides = overrides + fixes
+            rr = send(ctx, buildDoc(schema, op, sensitive, overrides))
+            body = rr.response()?.bodyToString().orEmpty()
+            tries++
+        }
+        return Probe(rr, body)
+    }
+
+    private fun send(ctx: CheckContext, doc: String): HttpRequestResponse =
+        GraphQLHttp.postJson(ctx.api, ctx.request, GraphQLHttp.queryEnvelope(doc), ctx.config.authHeadersA)
+
+    /** arg name → synthesized literal, for args whose scalar type the response flagged as invalid. */
+    private fun coercionFixes(op: Operation, body: String): Map<String, String> {
+        val fixes = HashMap<String, String>()
+        for (msg in GraphQLHttp.errorMessages(body)) {
+            val type = Heuristics.coercionTypeName(msg) ?: continue
+            val value = ScalarValues.synthesize(type, msg) ?: continue
+            op.field.args.filter { it.typeRef.namedType() == type }.forEach { fixes[it.name] = value }
+        }
+        return fixes
+    }
+
+    private fun buildDoc(schema: SchemaModel?, op: Operation, sensitive: List<String>, overrides: Map<String, String> = emptyMap()): String {
         // No schema (reconstruction gave only names) -> bare field probe.
         if (schema == null) return "query { ${op.field.name} }"
-        return QueryBuilder.operationDocument(schema, op, sensitive)
+        return QueryBuilder.operationDocument(schema, op, sensitive, overrides)
     }
 
     private fun operationFindings(
@@ -185,6 +229,7 @@ class OperationScanner {
         fun classify(body: String, field: String, status: Int): OperationStatus = when {
             Heuristics.containsAuthzError(body) -> OperationStatus.DENIED
             GraphQLResponses.fieldNonNull(body, field) -> OperationStatus.RESOLVED
+            Heuristics.isInputCoercionError(body) -> OperationStatus.INVALID_INPUT
             GraphQLHttp.errorMessages(body).isEmpty() && status in 200..299 -> OperationStatus.EMPTY
             else -> OperationStatus.ERROR
         }

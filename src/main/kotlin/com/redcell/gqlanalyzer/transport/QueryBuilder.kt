@@ -89,7 +89,9 @@ object QueryBuilder {
         "Float" -> "1.5"
         "Boolean" -> "true"
         "ID" -> "\"1\""
-        else -> "\"test\"" // String and custom scalars
+        "String" -> "\"test\""
+        // Custom scalars: use a format-appropriate sample when we recognize the name.
+        else -> ScalarValues.sampleFor(name) ?: "\"test\""
     }
 
     private fun inputObjectLiteral(schema: SchemaModel, typeName: String, depth: Int, seen: Set<String>): String {
@@ -102,26 +104,36 @@ object QueryBuilder {
         return "{ $body }"
     }
 
-    /** `(a: v, b: w)` filling required args only; empty string when there are none. */
-    fun argsFor(schema: SchemaModel, field: GqlField): String {
+    /**
+     * `(a: v, b: w)` filling required args only; empty string when there are none.
+     * [overrides] (arg name → literal) take precedence over generated placeholders —
+     * used by the adaptive scanner to feed back values that satisfy scalar validation.
+     */
+    fun argsFor(schema: SchemaModel, field: GqlField, overrides: Map<String, String> = emptyMap()): String {
         val required = field.args.filter { it.typeRef.isNonNull() }
         if (required.isEmpty()) return ""
-        return "(" + required.joinToString(", ") { "${it.name}: ${placeholderFor(schema, it.typeRef)}" } + ")"
+        return "(" + required.joinToString(", ") {
+            "${it.name}: ${overrides[it.name] ?: placeholderFor(schema, it.typeRef)}"
+        } + ")"
     }
 
     /**
      * A complete operation document for one [Operation]. Optional args are omitted;
-     * required args get typed placeholders. When [selectSensitive] names leaf fields,
-     * they are selected instead of the default `__typename`, so one probe can surface
-     * sensitive-field exposure.
+     * required args get typed placeholders (or [overrides] by arg name). When
+     * [selectSensitive] names leaf fields, they are selected instead of `__typename`.
      */
-    fun operationDocument(schema: SchemaModel, op: Operation, selectSensitive: List<String> = emptyList()): String {
+    fun operationDocument(
+        schema: SchemaModel,
+        op: Operation,
+        selectSensitive: List<String> = emptyList(),
+        overrides: Map<String, String> = emptyMap(),
+    ): String {
         val keyword = when (op.kind) {
             OperationKind.QUERY -> "query"
             OperationKind.MUTATION -> "mutation"
             OperationKind.SUBSCRIPTION -> "subscription"
         }
-        val args = argsFor(schema, op.field)
+        val args = argsFor(schema, op.field, overrides)
         val selection = when {
             selectSensitive.isNotEmpty() -> " { ${selectSensitive.joinToString(" ")} }"
             else -> selectionFor(schema, op.field)

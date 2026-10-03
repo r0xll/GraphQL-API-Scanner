@@ -19,7 +19,10 @@ enum class OperationStatus {
     /** Rejected by an authorization/authentication error. */
     DENIED,
 
-    /** Any other error (validation, server error, transport). */
+    /** Reached the server but our generated argument value failed scalar/input validation. */
+    INVALID_INPUT,
+
+    /** Any other error (server error, transport). */
     ERROR,
 }
 

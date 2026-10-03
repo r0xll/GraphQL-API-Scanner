@@ -216,4 +216,17 @@ object Heuristics {
         val creds = acac?.trim().equals("true", ignoreCase = true)
         return reflects && creds
     }
+
+    // ---- input/scalar coercion errors (adaptive probing) ----
+
+    private val COERCION = Regex(
+        """(?i)(expected (value of )?type|cannot represent|got invalid value|is not a valid|expected type .* found)""",
+    )
+    private val COERCION_TYPE = Regex("""[Ee]xpected (?:value of )?type\s+["']?([A-Za-z_][A-Za-z0-9_]*)""")
+
+    /** True when a response error is an argument/scalar coercion (validation) error, not authz/exec. */
+    fun isInputCoercionError(body: String): Boolean = COERCION.containsMatchIn(body)
+
+    /** The scalar/type name a single coercion error names (`Expected value of type "DateTime!"` → `DateTime`), else null. */
+    fun coercionTypeName(message: String): String? = COERCION_TYPE.find(message)?.groupValues?.get(1)
 }

@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
@@ -94,7 +95,8 @@ object GraphQLHttp {
         when (el) {
             is JsonObject -> el["errors"]?.let { errs ->
                 runCatching { errs.jsonArray }.getOrNull()?.forEach { e ->
-                    runCatching { e.jsonObject["message"]?.let { m -> add(m.toString().trim('"')) } }
+                    // Use the primitive content so inner quotes aren't left backslash-escaped.
+                    runCatching { e.jsonObject["message"]?.let { m -> add(m.jsonPrimitive.content) } }
                 }
             }
             else -> {}

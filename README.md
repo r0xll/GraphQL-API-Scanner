@@ -44,6 +44,11 @@ On load the Output tab logs:
    shapes) or GraphQL **SDL** (`.graphql`/`.graphqls`). The schema populates the tree
    and operations grid and drives the schema-static checks + per-operation scan
    exactly as live introspection would — no introspection request is sent.
+   The scanner is **adaptive about input**: required arguments get format-aware sample
+   values for common custom scalars (DateTime/UUID/Email/URL/…), and when the server
+   rejects a value with a scalar-validation error it feeds that error back in to
+   synthesize a satisfying value and retries (bounded). An operation whose input still
+   can't be satisfied is marked **INVALID_INPUT** rather than ERROR.
 4. **Crawl & scan per operation** — the Operations grid is Burp-API-scan-style:
    **all operations are ticked by default**; untick the ones you don't want, or click
    the **Test** column header to toggle all on/off, then click **Scan selected**. (The
