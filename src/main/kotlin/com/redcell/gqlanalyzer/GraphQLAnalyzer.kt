@@ -36,6 +36,6 @@ class GraphQLAnalyzer : BurpExtension {
 
     companion object {
         const val EXTENSION_NAME = "GraphQL OWASP-API Analyzer"
-        const val VERSION = "0.14.0"
+        const val VERSION = "0.15.0"
     }
 }

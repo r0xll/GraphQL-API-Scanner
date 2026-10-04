@@ -129,7 +129,9 @@ object Heuristics {
         val resolved = schema.type(named)
         return when (resolved?.kind) {
             "SCALAR" -> true           // String, ID, and every custom scalar
-            null -> named in STRINGY   // type not in the model (partial schema) — trust the built-in names
+            // Type absent from the model (partial/SDL schema): treat an unknown leaf as a
+            // custom scalar — it's a string-backed carrier far more often than an undeclared enum.
+            null -> true
             else -> false              // ENUM / INPUT_OBJECT / OBJECT / INTERFACE / UNION
         }
     }

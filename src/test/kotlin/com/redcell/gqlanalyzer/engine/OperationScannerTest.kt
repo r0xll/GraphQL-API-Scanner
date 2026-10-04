@@ -167,21 +167,23 @@ class OperationScannerTest {
     }
 
     @Test
-    fun `invalid-input operation sends no injection payloads`() {
+    fun `invalid-input operation still attempts injection (operator wants the evidence)`() {
         val s = customScalarSchema()
         val op = OperationEnumerator.enumerate(s).first { it.name == "QUERY.product" }
         // An unfixable coercion error -> INVALID_INPUT, no usable hint to synthesize.
         val coercion = """{"errors":[{"message":"Expected value of type \"ProductSerialNumber!\", found \"test\"; bad value."}]}"""
-        val (ctx, sent) = MockContext.build(listOf(rsp(coercion)), schema = s)
+        val (ctx, sent) = MockContext.build(listOf(rsp(coercion)), schema = s) // repeats
 
         val r = OperationScanner().scan(ctx, listOf(op))
         assertEquals(OperationStatus.INVALID_INPUT, r.statuses[op])
+        // 1 adaptive probe + quote + ssti on `serial` — the operator sees the attempts in Logger.
+        assertEquals(3, sent.requests.size)
+        // A coercion error is not an injection signature, so nothing is (falsely) reported.
         assertTrue(r.findings.none { it.checkId.startsWith("op-injection") })
-        assertEquals(1, sent.requests.size) // only the adaptive probe; no injection sends
     }
 
     @Test
-    fun `injectable arg count is capped`() {
+    fun `injection point count is capped`() {
         val query = GqlType(
             "Query", "OBJECT",
             fields = listOf(
@@ -195,9 +197,52 @@ class OperationScannerTest {
         val op = OperationEnumerator.enumerate(s).first { it.name == "QUERY.multi" }
         val (ctx, sent) = MockContext.build(listOf(rsp("""{"data":{"multi":true}}""")), schema = s) // repeats clean
 
-        OperationScanner(maxInjectableArgs = 2).scan(ctx, listOf(op))
-        // 1 adaptive baseline + 2 args × 2 payloads (quote + ssti) = 5; the 3rd arg is never injected.
+        OperationScanner(maxInjectionPoints = 2).scan(ctx, listOf(op))
+        // 1 adaptive baseline + 2 points × 2 payloads (quote + ssti) = 5; the 3rd arg is never injected.
         assertEquals(5, sent.requests.size)
+    }
+
+    @Test
+    fun `injects into nested fields of an input-object argument`() {
+        // mutation { evt(event: EventInput!) }  with string/custom-scalar leaves nested in the object.
+        val input = GqlType(
+            "EventInput", "INPUT_OBJECT",
+            inputFields = listOf(
+                GqlInputValue("id", nnScalar("ID")),
+                GqlInputValue("profileId", nnScalar("String")),
+                GqlInputValue("timestamp", nnScalar("DateTime")),
+                GqlInputValue("value", nnScalar("Float")),
+                GqlInputValue("type", GqlTypeRef(kind = "NON_NULL", ofType = GqlTypeRef(kind = "ENUM", name = "Cat"))),
+            ),
+        )
+        val mutation = GqlType(
+            "Mutation", "OBJECT",
+            fields = listOf(GqlField("evt", GqlTypeRef(kind = "SCALAR", name = "Boolean"), args = listOf(GqlInputValue("event", GqlTypeRef(kind = "NON_NULL", ofType = GqlTypeRef(kind = "INPUT_OBJECT", name = "EventInput")))))),
+        )
+        val cat = GqlType("Cat", "ENUM", enumValues = listOf("A"))
+        val s = SchemaModel("Query", "Mutation", null, listOf(GqlType("Query", "OBJECT"), mutation, input, cat, GqlType("DateTime", "SCALAR")))
+        val op = OperationEnumerator.enumerate(s).first { it.name == "MUTATION.evt" }
+
+        // Injectable leaves (required, string-backed): event.id, event.profileId, event.timestamp.
+        // Sends: baseline(1), then per leaf quote+ssti in order id, profileId, timestamp.
+        // Make the profileId quote (4th send, index 3) return a SQL error.
+        val clean = """{"data":{"evt":true}}"""
+        val sqlErr = """{"errors":[{"message":"ERROR: syntax error at or near \"'\""}]}"""
+        val (ctx, sent) = MockContext.build(
+            listOf(rsp(clean), rsp(clean), rsp(clean), rsp(sqlErr), rsp(clean), rsp(clean), rsp(clean)),
+            schema = s,
+        )
+
+        val r = OperationScanner().scan(ctx, listOf(op))
+        val f = r.findings.single { it.checkId == "op-injection-error" }
+        assertTrue(f.name.contains("event.profileId"))
+        assertEquals("Mutation.evt", f.affectedOperation)
+        // The profileId-quote request carried the payload in that field, with siblings kept valid.
+        // Bodies are JSON envelopes, so the doc's inner quotes are backslash-escaped (`"` -> \").
+        val profileIdQuote = sent.bodies[3]
+        assertTrue(profileIdQuote.contains("""profileId: \"'\""""))   // payload placed at the nested field
+        assertTrue(profileIdQuote.contains("timestamp:"))             // sibling present & valid
+        assertTrue(profileIdQuote.contains("id:"))                    // sibling present & valid
     }
 
     @Test

@@ -85,4 +85,50 @@ class QueryBuilderTest {
         val doc = QueryBuilder.operationDocument(schema, me, listOf("password", "token"))
         assertEquals("query { me { password token } }", doc)
     }
+
+    // ---- v0.15.0: injection into nested input-object leaves ----
+
+    /** mutation { evt(event: EventInput!) }  EventInput { id: ID!, profileId: String!, ts: DateTime!, value: Float!, type: Cat! } */
+    private fun inputObjectSchema(): SchemaModel {
+        val input = GqlType(
+            "EventInput", "INPUT_OBJECT",
+            inputFields = listOf(
+                GqlInputValue("id", nonNull(GqlTypeRef(kind = "SCALAR", name = "ID"))),
+                GqlInputValue("profileId", nonNull(scalar("String"))),
+                GqlInputValue("ts", nonNull(scalar("DateTime"))),
+                GqlInputValue("value", nonNull(scalar("Float"))),
+                GqlInputValue("type", nonNull(GqlTypeRef(kind = "ENUM", name = "Cat"))),
+            ),
+        )
+        val mutation = GqlType(
+            "Mutation", "OBJECT",
+            fields = listOf(com.redcell.gqlanalyzer.schema.GqlField("evt", scalar("Boolean"), args = listOf(GqlInputValue("event", nonNull(GqlTypeRef(kind = "INPUT_OBJECT", name = "EventInput")))))),
+        )
+        return SchemaModel("Query", "Mutation", null, listOf(GqlType("Query", "OBJECT"), mutation, input, GqlType("Cat", "ENUM", enumValues = listOf("A")), GqlType("DateTime", "SCALAR")))
+    }
+
+    @Test
+    fun `injectableLeafPaths descends into input objects and keeps only string-backed leaves`() {
+        val s = inputObjectSchema()
+        val evt = OperationEnumerator.enumerate(s).first { it.name == "MUTATION.evt" }
+        val paths = QueryBuilder.injectableLeafPaths(s, evt.field)
+        assertEquals(
+            listOf(listOf("event", "id"), listOf("event", "profileId"), listOf("event", "ts")),
+            paths,
+        ) // Float and enum excluded
+    }
+
+    @Test
+    fun `injectedDocumentForPath places the payload at the nested leaf and keeps siblings valid`() {
+        val s = inputObjectSchema()
+        val evt = OperationEnumerator.enumerate(s).first { it.name == "MUTATION.evt" }
+        val doc = QueryBuilder.injectedDocumentForPath(s, evt, listOf("event", "profileId"), QueryBuilder.literal("'"))
+
+        assertTrue(doc.startsWith("mutation { evt(event: {"))
+        assertTrue(doc.contains("profileId: \"'\""))         // payload at the targeted field
+        assertTrue(doc.contains("ts: \"2020-01-01T00:00:00Z\"")) // sibling custom scalar kept valid
+        assertTrue(doc.contains("value: 1.5"))                // sibling Float kept valid
+        assertTrue(doc.contains("type: A"))                   // sibling enum kept valid
+        assertTrue(doc.contains("id: \"1\""))                 // sibling ID kept valid
+    }
 }

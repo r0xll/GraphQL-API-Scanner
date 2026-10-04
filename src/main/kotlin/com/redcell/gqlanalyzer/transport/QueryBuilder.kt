@@ -1,5 +1,6 @@
 package com.redcell.gqlanalyzer.transport
 
+import com.redcell.gqlanalyzer.checks.Heuristics
 import com.redcell.gqlanalyzer.model.Operation
 import com.redcell.gqlanalyzer.model.OperationKind
 import com.redcell.gqlanalyzer.schema.GqlField
@@ -117,19 +118,59 @@ object QueryBuilder {
         } + ")"
     }
 
+    // ---- injection targeting (top-level AND nested input-object leaves) ----
+
     /**
-     * A complete operation document that forces [injectArg] to [injectLiteral] (an
-     * already-built GraphQL literal), whether that arg is required or optional, and fills
-     * the operation's *other* required args from [overrides] (falling back to typed
-     * placeholders). Used by the per-operation injection pass so a payload rides an
-     * otherwise-valid request — other required scalar args keep the values that satisfied
-     * validation during the adaptive probe.
+     * Field-name paths from each of [field]'s arguments down to a string-backed scalar leaf
+     * (`Heuristics.isInjectableScalar`), descending through INPUT_OBJECT args/fields
+     * (unwrapping NON_NULL/LIST), required fields only — matching the shape the baseline probe
+     * builds. A top-level scalar arg yields a one-element path (`["serial"]`); a nested field
+     * yields e.g. `["event","profileId"]`. Depth- and count-capped and cycle-guarded by input type.
      */
-    fun injectedOperationDocument(
+    fun injectableLeafPaths(schema: SchemaModel, field: GqlField, maxDepth: Int = 4, maxPoints: Int = 20): List<List<String>> {
+        val out = mutableListOf<List<String>>()
+        for (arg in field.args) {
+            collectLeafPaths(schema, arg.typeRef, listOf(arg.name), 0, maxDepth, emptySet(), maxPoints, out)
+            if (out.size >= maxPoints) break
+        }
+        return out.take(maxPoints)
+    }
+
+    private fun collectLeafPaths(
+        schema: SchemaModel,
+        typeRef: GqlTypeRef,
+        path: List<String>,
+        depth: Int,
+        maxDepth: Int,
+        seen: Set<String>,
+        maxPoints: Int,
+        out: MutableList<List<String>>,
+    ) {
+        if (out.size >= maxPoints) return
+        val named = typeRef.namedType() ?: return
+        val resolved = schema.type(named)
+        if (resolved?.kind == "INPUT_OBJECT") {
+            if (depth >= maxDepth || named in seen) return
+            for (f in resolved.inputFields.filter { it.typeRef.isNonNull() }) {
+                collectLeafPaths(schema, f.typeRef, path + f.name, depth + 1, maxDepth, seen + named, maxPoints, out)
+                if (out.size >= maxPoints) return
+            }
+        } else if (Heuristics.isInjectableScalar(schema, typeRef)) {
+            out += path
+        }
+    }
+
+    /**
+     * A complete operation document that places [payloadLiteral] at the single leaf named by
+     * [path] (e.g. `["event","profileId"]`) and keeps every other required arg/field valid
+     * (typed placeholders; top-level scalar args honour [overrides] from the adaptive probe).
+     * Used by the per-operation injection pass so exactly one field carries the payload.
+     */
+    fun injectedDocumentForPath(
         schema: SchemaModel,
         op: Operation,
-        injectArg: String,
-        injectLiteral: String,
+        path: List<String>,
+        payloadLiteral: String,
         overrides: Map<String, String> = emptyMap(),
     ): String {
         val keyword = when (op.kind) {
@@ -137,11 +178,37 @@ object QueryBuilder {
             OperationKind.MUTATION -> "mutation"
             OperationKind.SUBSCRIPTION -> "subscription"
         }
-        val others = op.field.args
-            .filter { it.typeRef.isNonNull() && it.name != injectArg }
-            .joinToString("") { "${it.name}: ${overrides[it.name] ?: placeholderFor(schema, it.typeRef)}, " }
-        val args = "($others$injectArg: $injectLiteral)"
+        val argName = path.first()
+        val rest = path.drop(1)
+        val injected = op.field.args.firstOrNull { it.name == argName }
+        val parts = mutableListOf<String>()
+        if (injected != null) parts += "$argName: ${buildInjectedArgValue(schema, injected.typeRef, rest, payloadLiteral)}"
+        for (a in op.field.args) {
+            if (a.name == argName || !a.typeRef.isNonNull()) continue
+            parts += "${a.name}: ${overrides[a.name] ?: placeholderFor(schema, a.typeRef)}"
+        }
+        val args = if (parts.isEmpty()) "" else "(" + parts.joinToString(", ") + ")"
         return "$keyword { ${op.field.name}$args${selectionFor(schema, op.field)} }"
+    }
+
+    /** Build an arg/field value, placing [payloadLiteral] at the end of [remaining] (empty ⇒ here). */
+    private fun buildInjectedArgValue(schema: SchemaModel, typeRef: GqlTypeRef, remaining: List<String>, payloadLiteral: String): String {
+        when (typeRef.kind) {
+            "NON_NULL" -> return buildInjectedArgValue(schema, typeRef.ofType ?: return "null", remaining, payloadLiteral)
+            "LIST" -> return "[" + buildInjectedArgValue(schema, typeRef.ofType ?: return "null", remaining, payloadLiteral) + "]"
+        }
+        if (remaining.isEmpty()) return payloadLiteral // the injected leaf
+        val resolved = typeRef.namedType()?.let { schema.type(it) }
+        if (resolved?.kind == "INPUT_OBJECT") {
+            val target = remaining.first()
+            val body = resolved.inputFields.filter { it.typeRef.isNonNull() }.joinToString(", ") { f ->
+                val v = if (f.name == target) buildInjectedArgValue(schema, f.typeRef, remaining.drop(1), payloadLiteral)
+                else placeholderFor(schema, f.typeRef)
+                "${f.name}: $v"
+            }
+            return "{ $body }"
+        }
+        return payloadLiteral // defensive: path pointed past a non-object leaf
     }
 
     /**

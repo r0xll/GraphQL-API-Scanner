@@ -51,7 +51,8 @@ class AdaptiveProbeTest {
         val coercion = """{"errors":[{"message":"Expected value of type \"Weird!\", found \"test\"; bad value."}]}"""
 
         val (ctx, sent) = MockContext.build(listOf(rsp(coercion)), schema = s)
-        val r = OperationScanner(maxInputRetries = 3).scan(ctx, listOf(op))
+        // Disable the injection pass here so the count isolates the adaptive-retry bound.
+        val r = OperationScanner(maxInputRetries = 3, maxInjectionPoints = 0).scan(ctx, listOf(op))
 
         assertEquals(OperationStatus.INVALID_INPUT, r.statuses[op])
         assertEquals(1, sent.requests.size) // no progress possible -> no wasted retries

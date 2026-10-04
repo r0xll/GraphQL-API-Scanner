@@ -26,8 +26,8 @@ import com.redcell.gqlanalyzer.transport.ScalarValues
 class OperationScanner(
     /** Bounded adaptive retries to satisfy scalar/input validation per operation (proof-level). */
     private val maxInputRetries: Int = 3,
-    /** Proof-level cap on how many injectable args per operation get an injection probe. */
-    private val maxInjectableArgs: Int = 10,
+    /** Proof-level cap on how many injectable leaf positions per operation get an injection probe. */
+    private val maxInjectionPoints: Int = 15,
 ) {
 
     data class ScanResult(
@@ -55,10 +55,12 @@ class OperationScanner(
             statuses[op] = status
             findings += opFindings
 
-            // Active in-band injection on the operation's own injectable args, reusing the
-            // values that already satisfied validation. Selection (this op is in the list) is
-            // the write gate, so mutations are probed only because the operator ticked them.
-            if (schema != null && status != OperationStatus.INVALID_INPUT) {
+            // Active in-band injection on the operation's injectable leaves (incl. nested
+            // input-object fields), reusing the values that satisfied validation. Selection
+            // (this op is in the list) is the write gate, so mutations are probed only because
+            // the operator ticked them. Attempted on every status — even INVALID_INPUT, since
+            // each payload rides a request whose other required fields are valid.
+            if (schema != null) {
                 findings += injectionFindings(ctx, schema, op, operationLocation(ctx, op), probe.overrides, probe.body)
             }
         }
@@ -258,14 +260,15 @@ class OperationScanner(
     }
 
     /**
-     * Active in-band injection on the operation's own injectable (string-backed scalar)
-     * arguments. For each arg it rides a payload on an otherwise-valid request (reusing the
-     * adaptive [workingOverrides]) and compares the response against the operation's own
-     * baseline ([baselineBody], the adaptive probe's final response): a *new* backend error
-     * signature ⇒ error-based SQL/NoSQL injection, `${7*7}` newly evaluating to `49` ⇒ SSTI.
-     * Results aggregate into at most one error finding and one SSTI finding per operation.
+     * Active in-band injection on the operation's injectable (string-backed scalar) leaves —
+     * including fields **nested inside input-object arguments** (e.g. `event.profileId`). For
+     * each leaf it rides a payload on an otherwise-valid request (siblings kept valid; top-level
+     * scalar args reuse the adaptive [workingOverrides]) and compares the response against the
+     * operation's own baseline ([baselineBody]): a *new* backend error signature ⇒ error-based
+     * SQL/NoSQL injection, `${7*7}` newly evaluating to `49` ⇒ SSTI. Results aggregate into at
+     * most one error finding and one SSTI finding per operation, labelled by the dotted path.
      *
-     * Proof-level: at most [maxInjectableArgs] args, ≤2 sends per arg, benign payloads only.
+     * Proof-level: at most [maxInjectionPoints] leaves, ≤2 sends per leaf, benign payloads only.
      */
     private fun injectionFindings(
         ctx: CheckContext,
@@ -275,10 +278,8 @@ class OperationScanner(
         workingOverrides: Map<String, String>,
         baselineBody: String,
     ): List<Finding> {
-        val injectable = op.field.args
-            .filter { Heuristics.isInjectableScalar(schema, it.typeRef) }
-            .take(maxInjectableArgs)
-        if (injectable.isEmpty()) return emptyList()
+        val points = QueryBuilder.injectableLeafPaths(schema, op.field, maxPoints = maxInjectionPoints)
+        if (points.isEmpty()) return emptyList()
 
         val baselineSigs = Heuristics.injectionSignatures(baselineBody).toSet()
         val baselineHad49 = Heuristics.evaluatedExpression(baselineBody, SSTI_RESULT)
@@ -288,19 +289,20 @@ class OperationScanner(
         val sstiArgs = linkedSetOf<String>()
         val evidence = mutableListOf<HttpRequestResponse>()
 
-        for (arg in injectable) {
-            val sqlRr = send(ctx, QueryBuilder.injectedOperationDocument(schema, op, arg.name, QueryBuilder.literal(SQL_PAYLOAD), workingOverrides))
+        for (path in points) {
+            val label = path.joinToString(".")
+            val sqlRr = send(ctx, QueryBuilder.injectedDocumentForPath(schema, op, path, QueryBuilder.literal(SQL_PAYLOAD), workingOverrides))
             val newSigs = Heuristics.injectionSignatures(sqlRr.response()?.bodyToString().orEmpty()).filterNot { it in baselineSigs }
             if (newSigs.isNotEmpty()) {
-                errorArgs += arg.name
+                errorArgs += label
                 errorSigs += newSigs
                 evidence += sqlRr
             }
 
             if (!baselineHad49) {
-                val sstiRr = send(ctx, QueryBuilder.injectedOperationDocument(schema, op, arg.name, QueryBuilder.literal(SSTI_PAYLOAD), workingOverrides))
+                val sstiRr = send(ctx, QueryBuilder.injectedDocumentForPath(schema, op, path, QueryBuilder.literal(SSTI_PAYLOAD), workingOverrides))
                 if (Heuristics.evaluatedExpression(sstiRr.response()?.bodyToString().orEmpty(), SSTI_RESULT)) {
-                    sstiArgs += arg.name
+                    sstiArgs += label
                     evidence += sstiRr
                 }
             }
@@ -310,10 +312,10 @@ class OperationScanner(
         val opName = "${op.parentTypeName}.${op.field.name}"
         if (errorArgs.isNotEmpty()) {
             out += Finding(
-                name = "Error-based injection in '${op.field.name}' (arg: ${errorArgs.joinToString(", ")})",
-                detail = "Injecting a single quote into ${errorArgs.joinToString(", ") { "`$it`" }} on `$opName` " +
+                name = "Error-based injection in '${op.field.name}' (at: ${errorArgs.joinToString(", ")})",
+                detail = "Injecting a single quote at ${errorArgs.joinToString(", ") { "`$it`" }} on `$opName` " +
                     "elicited a backend error not present in the operation's baseline response: " +
-                    "${errorSigs.joinToString("; ")}. The argument reaches an unparameterized SQL/NoSQL sink " +
+                    "${errorSigs.joinToString("; ")}. The field reaches an unparameterized SQL/NoSQL sink " +
                     "(A03 Injection). Confirm/exploit with sqlmap using the injection-seeder scaffold.\n\n" +
                     "CVSS v3.1: AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H (9.8, Critical) baseline for SQLi; adjust to the sink.",
                 severity = Severity.HIGH,
@@ -329,7 +331,7 @@ class OperationScanner(
         }
         if (sstiArgs.isNotEmpty()) {
             out += Finding(
-                name = "Template/expression injection (SSTI) in '${op.field.name}' (arg: ${sstiArgs.joinToString(", ")})",
+                name = "Template/expression injection (SSTI) in '${op.field.name}' (at: ${sstiArgs.joinToString(", ")})",
                 detail = "The payload `\${7*7}` placed in ${sstiArgs.joinToString(", ") { "`$it`" }} on `$opName` came " +
                     "back evaluated to `49` (absent from the baseline), so the backend evaluates attacker-controlled " +
                     "input in a template/expression engine (SSTI → often RCE). Confirm the engine and that `49` is " +

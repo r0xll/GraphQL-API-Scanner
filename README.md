@@ -85,7 +85,7 @@ On load the Output tab logs:
 | BFLA | API5:2023 | privileged query reachable by low-priv identity (read-only) |
 | Verbose errors | API8:2023 | stack-trace / SQL / framework leakage |
 | Injection insertion points | (A03 Injection) | schema-static seeder for sqlmap/nuclei (String/ID + custom scalars) |
-| Active in-band injection (per operation) | API8:2023 / A03 | during **Scan selected**, each selected op's injectable args (String/ID + custom scalars): `'` → backend SQL/NoSQL error (baseline-subtracted), `${7*7}` → evaluated to `49` (SSTI) |
+| Active in-band injection (per operation) | API8:2023 / A03 | during **Scan selected**, every injectable leaf of each selected op — String/ID/custom scalars, **including fields nested inside input-object args** (`event.profileId`): `'` → backend SQL/NoSQL error (baseline-subtracted), `${7*7}` → evaluated to `49` (SSTI) |
 | SSRF candidate arguments | API7:2023 | schema-static seeder (url/webhook/callback args) + Collaborator scaffold |
 | GraphQL IDE exposed in prod | API8:2023 | GET detects GraphiQL/Playground/Altair |
 | Content-Type CORS bypass | API8:2023 | `{__typename}` as `text/plain` (simple request, no preflight) |
@@ -124,22 +124,26 @@ step is the extension's key differentiator over static GraphQL scanners.
 Injection runs **per operation during Scan selected** — alongside the BOLA/BFLA/field-authz
 probes — so it tests exactly the operations you tick (queries **and** selected mutations; the
 selection + Scan click is the write gate) and the requests stream into Burp's Logger as you
-scan. For each **injectable** argument of an operation — `String`, `ID`, **and custom scalars**
-(`DateTime`, `UUID`, `ProductSerialNumber`, …; numeric/bool built-ins are excluded) — the payload
-rides the operation's *otherwise-valid* request (reusing the values that satisfied validation in
-the adaptive probe) and the response is compared against that operation's baseline:
+scan. It targets every **injectable leaf** of an operation — `String`, `ID`, **and custom scalars**
+(`DateTime`, `UUID`, `ProductSerialNumber`, …; numeric/bool built-ins are excluded) — **including
+fields nested inside input-object arguments**, e.g. `mutation { createEvent(event: { profileId: … }) }`
+injects at `event.profileId`. One leaf carries the payload per request while every sibling field is
+kept valid; the payload rides the operation's *otherwise-valid* request (top-level scalar args reuse
+the values that satisfied validation in the adaptive probe), and the response is compared against
+that operation's baseline:
 
 - a *new* backend error signature (SQLSTATE / SQL syntax / Oracle / SQLite / SQL Server / Mongo /
   command-path) ⇒ **error-based SQL/NoSQL injection** (`op-injection-error`, FIRM);
 - `${7*7}` coming back as `49` ⇒ **template/expression injection** (`op-injection-ssti`, TENTATIVE
   — confirm it's evaluation, not coincidence).
 
-Findings are tagged to the affected operation (`url#Type.field`) and counted in the grid's
-**Findings** column. Proof-level and non-destructive: ≤2 sends per injectable argument, a per-op
-arg cap, benign payloads only (a quote and an arithmetic expression) — no boolean-blind data
-tampering, stacked/destructive SQL, or OS command execution. Operations stuck at `INVALID_INPUT`
-are skipped (the payload can't reach a sink). Use the injection-seeder's sqlmap scaffold to
-confirm and exploit a hit.
+Findings are tagged to the affected operation (`url#Type.field`, with the vulnerable position named
+by its dotted path, e.g. `event.profileId`) and counted in the grid's **Findings** column.
+Proof-level and non-destructive: ≤2 sends per injectable leaf, a per-op leaf cap, benign payloads
+only (a quote and an arithmetic expression) — no boolean-blind data tampering, stacked/destructive
+SQL, or OS command execution. Injection is attempted on every selected op (even those the grid marks
+`INVALID_INPUT`, so you still see the attempts in Logger). Use the injection-seeder's sqlmap scaffold
+to confirm and exploit a hit.
 
 ## Stack
 
