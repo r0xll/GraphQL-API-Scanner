@@ -315,7 +315,12 @@ class TargetPanel(
     }
 
     private fun countPerOperation(ops: List<Operation>, found: List<Finding>): Map<Operation, Int> =
-        ops.associateWith { op -> found.count { it.location.endsWith("#${op.name}") || it.location == op.name } }
+        ops.associateWith { op ->
+            // Per-op findings tag their location with `#Type.field` (parentTypeName.field),
+            // not the op's `KIND.field` name — match that so the grid's Findings column fills.
+            val label = "${op.parentTypeName}.${op.field.name}"
+            found.count { it.location.endsWith("#$label") || it.location == label }
+        }
 
     private fun runOffEdt(name: String, block: () -> Unit) {
         Thread(block, name).apply { isDaemon = true }.start()

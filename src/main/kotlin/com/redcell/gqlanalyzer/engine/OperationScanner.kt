@@ -26,6 +26,8 @@ import com.redcell.gqlanalyzer.transport.ScalarValues
 class OperationScanner(
     /** Bounded adaptive retries to satisfy scalar/input validation per operation (proof-level). */
     private val maxInputRetries: Int = 3,
+    /** Proof-level cap on how many injectable args per operation get an injection probe. */
+    private val maxInjectableArgs: Int = 10,
 ) {
 
     data class ScanResult(
@@ -52,6 +54,13 @@ class OperationScanner(
             val (status, opFindings) = scoreOperation(ctx, op, probe.rr, probe.body, sensitive)
             statuses[op] = status
             findings += opFindings
+
+            // Active in-band injection on the operation's own injectable args, reusing the
+            // values that already satisfied validation. Selection (this op is in the list) is
+            // the write gate, so mutations are probed only because the operator ticked them.
+            if (schema != null && status != OperationStatus.INVALID_INPUT) {
+                findings += injectionFindings(ctx, schema, op, operationLocation(ctx, op), probe.overrides, probe.body)
+            }
         }
 
         // Per-operation locations keep issues distinct; dedupe like CheckEngine.
@@ -71,20 +80,27 @@ class OperationScanner(
         body: String = rr.response()?.bodyToString().orEmpty(),
         sensitive: List<String> = ctx.schema?.let { sensitiveLeaves(it, op) } ?: emptyList(),
     ): Pair<OperationStatus, List<Finding>> {
-        val baseUrl = runCatching { ctx.request.url() }.getOrNull().orEmpty()
-        val opLabel = "${op.parentTypeName}.${op.field.name}"
-        val loc = if (baseUrl.isEmpty()) opLabel else "$baseUrl#$opLabel"
+        val loc = operationLocation(ctx, op)
         val status = classify(body, op.field.name, rr.response()?.statusCode()?.toInt() ?: 0)
         val findings = operationFindings(ctx, op, loc, body, rr, sensitive)
         return status to findings
     }
 
-    private data class Probe(val rr: HttpRequestResponse, val body: String)
+    /** `url#Type.field` (or bare `Type.field` when the base URL is unavailable). */
+    private fun operationLocation(ctx: CheckContext, op: Operation): String {
+        val baseUrl = runCatching { ctx.request.url() }.getOrNull().orEmpty()
+        val opLabel = "${op.parentTypeName}.${op.field.name}"
+        return if (baseUrl.isEmpty()) opLabel else "$baseUrl#$opLabel"
+    }
+
+    private data class Probe(val rr: HttpRequestResponse, val body: String, val overrides: Map<String, String>)
 
     /**
      * Send the operation, and while the server rejects a generated argument with a
      * scalar/input coercion error, feed that error back in to synthesize a satisfying
-     * value and retry — bounded by [maxInputRetries], never a large loop.
+     * value and retry — bounded by [maxInputRetries], never a large loop. The final
+     * [Probe.overrides] are the arg values that satisfied validation, reused by the
+     * injection pass so payloads ride an otherwise-valid request.
      */
     private fun adaptiveProbe(ctx: CheckContext, schema: SchemaModel?, op: Operation, sensitive: List<String>): Probe {
         var overrides = emptyMap<String, String>()
@@ -102,7 +118,7 @@ class OperationScanner(
             body = rr.response()?.bodyToString().orEmpty()
             tries++
         }
-        return Probe(rr, body)
+        return Probe(rr, body, overrides)
     }
 
     private fun send(ctx: CheckContext, doc: String): HttpRequestResponse =
@@ -241,6 +257,98 @@ class OperationScanner(
         )
     }
 
+    /**
+     * Active in-band injection on the operation's own injectable (string-backed scalar)
+     * arguments. For each arg it rides a payload on an otherwise-valid request (reusing the
+     * adaptive [workingOverrides]) and compares the response against the operation's own
+     * baseline ([baselineBody], the adaptive probe's final response): a *new* backend error
+     * signature ⇒ error-based SQL/NoSQL injection, `${7*7}` newly evaluating to `49` ⇒ SSTI.
+     * Results aggregate into at most one error finding and one SSTI finding per operation.
+     *
+     * Proof-level: at most [maxInjectableArgs] args, ≤2 sends per arg, benign payloads only.
+     */
+    private fun injectionFindings(
+        ctx: CheckContext,
+        schema: SchemaModel,
+        op: Operation,
+        loc: String,
+        workingOverrides: Map<String, String>,
+        baselineBody: String,
+    ): List<Finding> {
+        val injectable = op.field.args
+            .filter { Heuristics.isInjectableScalar(schema, it.typeRef) }
+            .take(maxInjectableArgs)
+        if (injectable.isEmpty()) return emptyList()
+
+        val baselineSigs = Heuristics.injectionSignatures(baselineBody).toSet()
+        val baselineHad49 = Heuristics.evaluatedExpression(baselineBody, SSTI_RESULT)
+
+        val errorArgs = linkedSetOf<String>()
+        val errorSigs = linkedSetOf<String>()
+        val sstiArgs = linkedSetOf<String>()
+        val evidence = mutableListOf<HttpRequestResponse>()
+
+        for (arg in injectable) {
+            val sqlRr = send(ctx, QueryBuilder.injectedOperationDocument(schema, op, arg.name, QueryBuilder.literal(SQL_PAYLOAD), workingOverrides))
+            val newSigs = Heuristics.injectionSignatures(sqlRr.response()?.bodyToString().orEmpty()).filterNot { it in baselineSigs }
+            if (newSigs.isNotEmpty()) {
+                errorArgs += arg.name
+                errorSigs += newSigs
+                evidence += sqlRr
+            }
+
+            if (!baselineHad49) {
+                val sstiRr = send(ctx, QueryBuilder.injectedOperationDocument(schema, op, arg.name, QueryBuilder.literal(SSTI_PAYLOAD), workingOverrides))
+                if (Heuristics.evaluatedExpression(sstiRr.response()?.bodyToString().orEmpty(), SSTI_RESULT)) {
+                    sstiArgs += arg.name
+                    evidence += sstiRr
+                }
+            }
+        }
+
+        val out = mutableListOf<Finding>()
+        val opName = "${op.parentTypeName}.${op.field.name}"
+        if (errorArgs.isNotEmpty()) {
+            out += Finding(
+                name = "Error-based injection in '${op.field.name}' (arg: ${errorArgs.joinToString(", ")})",
+                detail = "Injecting a single quote into ${errorArgs.joinToString(", ") { "`$it`" }} on `$opName` " +
+                    "elicited a backend error not present in the operation's baseline response: " +
+                    "${errorSigs.joinToString("; ")}. The argument reaches an unparameterized SQL/NoSQL sink " +
+                    "(A03 Injection). Confirm/exploit with sqlmap using the injection-seeder scaffold.\n\n" +
+                    "CVSS v3.1: AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H (9.8, Critical) baseline for SQLi; adjust to the sink.",
+                severity = Severity.HIGH,
+                confidence = Confidence.FIRM,
+                remediation = "Use parameterized queries / prepared statements in the resolver; validate and " +
+                    "canonicalize argument values; apply least-privilege DB accounts.",
+                evidence = evidence.toList(),
+                checkId = "op-injection-error",
+                owaspId = "API8:2023",
+                location = loc,
+                affectedOperation = opName,
+            )
+        }
+        if (sstiArgs.isNotEmpty()) {
+            out += Finding(
+                name = "Template/expression injection (SSTI) in '${op.field.name}' (arg: ${sstiArgs.joinToString(", ")})",
+                detail = "The payload `\${7*7}` placed in ${sstiArgs.joinToString(", ") { "`$it`" }} on `$opName` came " +
+                    "back evaluated to `49` (absent from the baseline), so the backend evaluates attacker-controlled " +
+                    "input in a template/expression engine (SSTI → often RCE). Confirm the engine and that `49` is " +
+                    "evaluation rather than coincidental reflection before escalating.\n\n" +
+                    "CVSS v3.1: AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H (9.8, Critical) if it proves to be RCE.",
+                severity = Severity.HIGH,
+                confidence = Confidence.TENTATIVE,
+                remediation = "Never interpolate user input into template/expression engines; use a sandboxed, " +
+                    "logic-less template and pass data as bound context values.",
+                evidence = evidence.toList(),
+                checkId = "op-injection-ssti",
+                owaspId = "API8:2023",
+                location = loc,
+                affectedOperation = opName,
+            )
+        }
+        return out
+    }
+
     /** Sensitive scalar/enum leaf fields on the operation's return object type. */
     private fun sensitiveLeaves(schema: SchemaModel, op: Operation): List<String> {
         val rt = schema.type(op.field.typeRef.namedType()) ?: return emptyList()
@@ -248,6 +356,10 @@ class OperationScanner(
     }
 
     companion object {
+        private const val SQL_PAYLOAD = "'"
+        private const val SSTI_PAYLOAD = "\${7*7}"
+        private const val SSTI_RESULT = "49"
+
         fun classify(body: String, field: String, status: Int): OperationStatus = when {
             Heuristics.containsAuthzError(body) -> OperationStatus.DENIED
             GraphQLResponses.fieldNonNull(body, field) -> OperationStatus.RESOLVED

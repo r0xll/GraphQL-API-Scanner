@@ -118,6 +118,33 @@ object QueryBuilder {
     }
 
     /**
+     * A complete operation document that forces [injectArg] to [injectLiteral] (an
+     * already-built GraphQL literal), whether that arg is required or optional, and fills
+     * the operation's *other* required args from [overrides] (falling back to typed
+     * placeholders). Used by the per-operation injection pass so a payload rides an
+     * otherwise-valid request — other required scalar args keep the values that satisfied
+     * validation during the adaptive probe.
+     */
+    fun injectedOperationDocument(
+        schema: SchemaModel,
+        op: Operation,
+        injectArg: String,
+        injectLiteral: String,
+        overrides: Map<String, String> = emptyMap(),
+    ): String {
+        val keyword = when (op.kind) {
+            OperationKind.QUERY -> "query"
+            OperationKind.MUTATION -> "mutation"
+            OperationKind.SUBSCRIPTION -> "subscription"
+        }
+        val others = op.field.args
+            .filter { it.typeRef.isNonNull() && it.name != injectArg }
+            .joinToString("") { "${it.name}: ${overrides[it.name] ?: placeholderFor(schema, it.typeRef)}, " }
+        val args = "($others$injectArg: $injectLiteral)"
+        return "$keyword { ${op.field.name}$args${selectionFor(schema, op.field)} }"
+    }
+
+    /**
      * A complete operation document for one [Operation]. Optional args are omitted;
      * required args get typed placeholders (or [overrides] by arg name). When
      * [selectSensitive] names leaf fields, they are selected instead of `__typename`.

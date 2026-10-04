@@ -56,8 +56,9 @@ On load the Output tab logs:
    selected operation is probed individually; its status (RESOLVED / DENIED / EMPTY /
    ERROR) and per-operation findings appear in the grid, and every finding is added to
    Burp's site map as an `AuditIssue` with evidence. Per-operation findings cover BOLA
-   (API1), BFLA (API5), sensitive-field exposure (API3), and verbose errors (API8),
-   tagged `url#QUERY.fieldName`.
+   (API1), BFLA (API5), sensitive-field exposure (API3), verbose errors (API8), and
+   **active in-band injection** (error-based SQL/NoSQL + SSTI) on the operation's injectable
+   arguments, each tagged `url#Type.field`.
 5. **Edit & re-test an operation** — double-click any row in the Operations grid (handy for
    ones stuck at **INVALID_INPUT**/**ERROR**) to open a Repeater-style editor: it shows the exact
    request the scanner sent and the API's response. Edit the request — query, variables, or
@@ -83,8 +84,8 @@ On load the Output tab logs:
 | BOLA | API1:2023 | two-identity object access |
 | BFLA | API5:2023 | privileged query reachable by low-priv identity (read-only) |
 | Verbose errors | API8:2023 | stack-trace / SQL / framework leakage |
-| Injection insertion points | (A03 Injection) | schema-static seeder for sqlmap/nuclei |
-| Active in-band injection | API8:2023 / A03 | query-root String/ID args: `'` → backend SQL/NoSQL error (baseline-subtracted), `${7*7}` → evaluated to `49` (SSTI) |
+| Injection insertion points | (A03 Injection) | schema-static seeder for sqlmap/nuclei (String/ID + custom scalars) |
+| Active in-band injection (per operation) | API8:2023 / A03 | during **Scan selected**, each selected op's injectable args (String/ID + custom scalars): `'` → backend SQL/NoSQL error (baseline-subtracted), `${7*7}` → evaluated to `49` (SSTI) |
 | SSRF candidate arguments | API7:2023 | schema-static seeder (url/webhook/callback args) + Collaborator scaffold |
 | GraphQL IDE exposed in prod | API8:2023 | GET detects GraphiQL/Playground/Altair |
 | Content-Type CORS bypass | API8:2023 | `{__typename}` as `text/plain` (simple request, no preflight) |
@@ -120,15 +121,25 @@ step is the extension's key differentiator over static GraphQL scanners.
 
 ## Active in-band injection (no Collaborator)
 
-`active-injection` complements the static seeder and the OOB canary with a lightweight,
-non-destructive in-band probe. For each String/ID argument on a **read-only root query
-field** (capped, never a mutation/subscription) it sends a clean baseline request, then a
-single quote and `${7*7}`, and compares against the baseline: a *new* backend error
-signature (SQLSTATE / SQL syntax / Oracle / Mongo …) ⇒ error-based SQL/NoSQL injection
-(FIRM), and `${7*7}` coming back as `49` ⇒ template/expression injection (SSTI, TENTATIVE —
-confirm it's evaluation, not coincidence). Payloads are benign (a quote and an arithmetic
-expression); there is no boolean-blind data tampering, stacked/destructive SQL, or OS command
-execution. Use the injection-seeder's sqlmap scaffold to confirm and exploit a hit.
+Injection runs **per operation during Scan selected** — alongside the BOLA/BFLA/field-authz
+probes — so it tests exactly the operations you tick (queries **and** selected mutations; the
+selection + Scan click is the write gate) and the requests stream into Burp's Logger as you
+scan. For each **injectable** argument of an operation — `String`, `ID`, **and custom scalars**
+(`DateTime`, `UUID`, `ProductSerialNumber`, …; numeric/bool built-ins are excluded) — the payload
+rides the operation's *otherwise-valid* request (reusing the values that satisfied validation in
+the adaptive probe) and the response is compared against that operation's baseline:
+
+- a *new* backend error signature (SQLSTATE / SQL syntax / Oracle / SQLite / SQL Server / Mongo /
+  command-path) ⇒ **error-based SQL/NoSQL injection** (`op-injection-error`, FIRM);
+- `${7*7}` coming back as `49` ⇒ **template/expression injection** (`op-injection-ssti`, TENTATIVE
+  — confirm it's evaluation, not coincidence).
+
+Findings are tagged to the affected operation (`url#Type.field`) and counted in the grid's
+**Findings** column. Proof-level and non-destructive: ≤2 sends per injectable argument, a per-op
+arg cap, benign payloads only (a quote and an arithmetic expression) — no boolean-blind data
+tampering, stacked/destructive SQL, or OS command execution. Operations stuck at `INVALID_INPUT`
+are skipped (the payload can't reach a sink). Use the injection-seeder's sqlmap scaffold to
+confirm and exploit a hit.
 
 ## Stack
 

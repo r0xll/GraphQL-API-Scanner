@@ -103,12 +103,36 @@ object Heuristics {
         schema.types.filter { it.kind == "OBJECT" }
             .flatMap { t ->
                 t.fields.flatMap { f ->
-                    f.args.filter { it.typeRef.namedType() in STRINGY }
+                    f.args.filter { isInjectableScalar(schema, it.typeRef) }
                         .map { InsertionPoint(t.name, f.name, it.name, it.typeRef.namedType() ?: "?") }
                 }
             }
 
     private val STRINGY = setOf("String", "ID")
+
+    /** Built-in scalars whose values are numeric/boolean — not string-backed injection carriers. */
+    private val NON_STRING_BUILTIN_SCALARS = setOf("Int", "Float", "Boolean")
+
+    /**
+     * True when [typeRef]'s leaf type is a string-backed scalar an injection payload can ride:
+     * the built-in `String`/`ID`, or any **custom scalar** (e.g. `DateTime`, `ProductSerialNumber`,
+     * `UUID`), which are serialized as strings and reach the same resolver sinks. Excludes the
+     * numeric/boolean built-ins and non-scalar types (enums, input objects, objects).
+     *
+     * A custom scalar is one the schema declares with kind `SCALAR`; when the schema does not
+     * carry the type (reconstructed/partial), fall back to the built-in string names so detection
+     * still works without full introspection.
+     */
+    fun isInjectableScalar(schema: SchemaModel, typeRef: com.redcell.gqlanalyzer.schema.GqlTypeRef): Boolean {
+        val named = typeRef.namedType() ?: return false
+        if (named in NON_STRING_BUILTIN_SCALARS) return false
+        val resolved = schema.type(named)
+        return when (resolved?.kind) {
+            "SCALAR" -> true           // String, ID, and every custom scalar
+            null -> named in STRINGY   // type not in the model (partial schema) — trust the built-in names
+            else -> false              // ENUM / INPUT_OBJECT / OBJECT / INTERFACE / UNION
+        }
+    }
 
     // ---- SSRF insertion points (API7) ----
 

@@ -32,13 +32,15 @@ class AdaptiveProbeTest {
         val coercion = """{"errors":[{"message":"Expected value of type \"ProductSerialNumber!\", found \"test\"; must be a string that is exactly 16 characters long where each character is parsable as an integer."}]}"""
         val resolved = """{"data":{"product":{"__typename":"Product"}}}"""
 
-        val (ctx, sent) = MockContext.build(listOf(rsp(coercion), rsp(resolved)), schema = s)
+        // primary(coercion) + adaptive retry(resolved), then the injection pass on `serial`
+        // (an injectable custom scalar) adds a quote + an SSTI probe — all resolved/clean here.
+        val (ctx, sent) = MockContext.build(listOf(rsp(coercion), rsp(resolved), rsp(resolved), rsp(resolved)), schema = s)
         val r = OperationScanner(maxInputRetries = 3).scan(ctx, listOf(op))
 
         assertEquals(OperationStatus.RESOLVED, r.statuses[op])
-        assertEquals(2, sent.requests.size) // primary + one adaptive retry
+        assertEquals(4, sent.requests.size) // primary + adaptive retry + 2 injection probes
         assertTrue(!sent.bodies.first().contains("0000000000000000")) // first try used the dumb placeholder
-        assertTrue(sent.bodies.last().contains("0000000000000000")) // retry used the mined value
+        assertTrue(sent.bodies[1].contains("0000000000000000")) // adaptive retry used the mined value
     }
 
     @Test
