@@ -7,6 +7,7 @@ import com.redcell.gqlanalyzer.schema.GqlInputValue
 import com.redcell.gqlanalyzer.schema.GqlType
 import com.redcell.gqlanalyzer.schema.GqlTypeRef
 import com.redcell.gqlanalyzer.schema.SchemaModel
+import com.redcell.gqlanalyzer.transport.InjectionPayloads
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -32,13 +33,13 @@ class AdaptiveProbeTest {
         val coercion = """{"errors":[{"message":"Expected value of type \"ProductSerialNumber!\", found \"test\"; must be a string that is exactly 16 characters long where each character is parsable as an integer."}]}"""
         val resolved = """{"data":{"product":{"__typename":"Product"}}}"""
 
-        // primary(coercion) + adaptive retry(resolved), then the injection pass on `serial`
-        // (an injectable custom scalar) adds a quote + an SSTI probe — all resolved/clean here.
-        val (ctx, sent) = MockContext.build(listOf(rsp(coercion), rsp(resolved), rsp(resolved), rsp(resolved)), schema = s)
+        // primary(coercion) + adaptive retry(resolved), then the injection catalog on `serial`
+        // (an injectable custom scalar) — all resolved/clean here, so nothing fires.
+        val (ctx, sent) = MockContext.build(listOf(rsp(coercion), rsp(resolved)), schema = s)
         val r = OperationScanner(maxInputRetries = 3).scan(ctx, listOf(op))
 
         assertEquals(OperationStatus.RESOLVED, r.statuses[op])
-        assertEquals(4, sent.requests.size) // primary + adaptive retry + 2 injection probes
+        assertEquals(2 + InjectionPayloads.inBand.size, sent.requests.size) // primary + retry + full catalog
         assertTrue(!sent.bodies.first().contains("0000000000000000")) // first try used the dumb placeholder
         assertTrue(sent.bodies[1].contains("0000000000000000")) // adaptive retry used the mined value
     }

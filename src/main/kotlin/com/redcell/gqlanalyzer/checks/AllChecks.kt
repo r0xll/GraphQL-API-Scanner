@@ -1,6 +1,5 @@
 package com.redcell.gqlanalyzer.checks
 
-import com.redcell.gqlanalyzer.checks.impl.ActiveSsrfCheck
 import com.redcell.gqlanalyzer.checks.impl.AltIntrospectionCheck
 import com.redcell.gqlanalyzer.checks.impl.ApqDetectionCheck
 import com.redcell.gqlanalyzer.checks.impl.AuthAmplificationCheck
@@ -25,7 +24,6 @@ import com.redcell.gqlanalyzer.checks.impl.IdorEnumerationCheck
 import com.redcell.gqlanalyzer.checks.impl.InjectionSeederCheck
 import com.redcell.gqlanalyzer.checks.impl.IntrospectionCheck
 import com.redcell.gqlanalyzer.checks.impl.MassAssignmentCheck
-import com.redcell.gqlanalyzer.checks.impl.OobCanaryInjectionCheck
 import com.redcell.gqlanalyzer.checks.impl.SensitiveFlowCheck
 import com.redcell.gqlanalyzer.checks.impl.UserEnumerationCheck
 import com.redcell.gqlanalyzer.checks.impl.PaginationAbuseCheck
@@ -65,9 +63,8 @@ object AllChecks {
         CircularFragmentCheck(),
         PaginationAbuseCheck(),
         FieldDuplicationCheck(),
-        // v0.6.0 — active out-of-band confirmation (Burp Collaborator)
-        ActiveSsrfCheck(),
-        OobCanaryInjectionCheck(),
+        // v0.6.0 OOB confirmation (ActiveSsrf/OobCanary) folded into the per-operation scan
+        // (engine/OperationScanner) in v0.16.0 — it covers nested input-object leaves + mutations.
         // v0.7.0 — auth & deeper authz
         IdorEnumerationCheck(),
         AuthAmplificationCheck(),

@@ -274,6 +274,12 @@ object Heuristics {
         "ODBC/SQL Server error" to Regex("""(?i)(Unclosed quotation mark|Microsoft SQL Server|ODBC SQL)"""),
         "MongoDB error" to Regex("""(?i)(MongoError|BSONError|E11000|unknown operator \$)"""),
         "command/path leak" to Regex("""(?i)(sh: .*: not found|/bin/sh:|cannot execute binary)"""),
+        // additional dialects / drivers
+        "PostgreSQL driver" to Regex("""(?i)(PG::\w+Error|org\.postgresql\.util\.PSQLException|pq: )"""),
+        "MySQL driver" to Regex("""(?i)(com\.mysql\.jdbc|MySqlException|Warning.*mysqli?_|valid MySQL result)"""),
+        "SQL Server driver" to Regex("""(?i)(System\.Data\.SqlClient\.SqlException|Incorrect syntax near|JDBC.*SQLServer)"""),
+        "generic SQL error" to Regex("""(?i)(quoted string not properly terminated|unexpected end of SQL|near "[^"]*": syntax error)"""),
+        "Mongo/NoSQL cast" to Regex("""(?i)(CastError|failed to parse|\${'$'}where|BadValue|Unsupported projection)"""),
     )
 
     /** Named backend injection-error signatures present in [body] (empty when none). */
@@ -281,10 +287,43 @@ object Heuristics {
         INJECTION_SIGNATURES.filter { it.second.containsMatchIn(body) }.map { it.first }
 
     /**
-     * True when [body] contains [needle] (default `49`), indicating the server evaluated
-     * an injected arithmetic/template expression (`7*7` → `49`) — template-injection (SSTI)
-     * or expression-evaluation reflection. The caller must confirm it is evaluation, not the
-     * raw payload echoed back.
+     * True when [body] contains [needle], indicating the server evaluated an injected
+     * arithmetic/template expression (e.g. `7*191` → `1337`) — template injection (SSTI) or
+     * expression-evaluation reflection. The caller confirms it is evaluation, not an echo.
      */
-    fun evaluatedExpression(body: String, needle: String = "49"): Boolean = body.contains(needle)
+    fun evaluatedExpression(body: String, needle: String = "1337"): Boolean = body.contains(needle)
+
+    /** Markers that a path-traversal payload read a system file (LFI): /etc/passwd or win.ini. */
+    private val FILE_READ: List<Pair<String, Regex>> = listOf(
+        "/etc/passwd" to Regex("""root:.*?:0:0:"""),
+        "win.ini" to Regex("""(?i)(\[fonts\]|\[extensions\]|for 16-bit app support)"""),
+    )
+
+    /** Named local-file-read markers present in [body] (empty when none) — path-traversal confirmation. */
+    fun fileReadSignatures(body: String): List<String> =
+        FILE_READ.filter { it.second.containsMatchIn(body) }.map { it.first }
+
+    /**
+     * Time-based blind signal: the injected sleep made this response at least [thresholdMs]
+     * slower than the operation's baseline. Pure so it is unit-testable without real latency.
+     */
+    fun timeBlindFired(baselineMs: Long, payloadMs: Long, thresholdMs: Long = 4000): Boolean =
+        payloadMs - baselineMs >= thresholdMs
+
+    /**
+     * Boolean-based blind signal: a TRUE tautology and a FALSE contradiction produced different
+     * outcomes — one errored and the other didn't, or TRUE returned data while FALSE did not.
+     * Conservative (reports only the differential, never dumped data). Pure/JSON-free so it is
+     * testable; the finding tells the operator to confirm.
+     */
+    fun booleanBlindDiffers(trueBody: String, falseBody: String): Boolean {
+        val tErr = trueBody.contains("\"errors\"")
+        val fErr = falseBody.contains("\"errors\"")
+        if (tErr != fErr) return true
+        return dataNonNull(trueBody) && !dataNonNull(falseBody)
+    }
+
+    private val DATA_NULL = Regex("""(?i)"data"\s*:\s*null""")
+    private fun dataNonNull(body: String): Boolean =
+        body.contains("\"data\"") && !DATA_NULL.containsMatchIn(body)
 }

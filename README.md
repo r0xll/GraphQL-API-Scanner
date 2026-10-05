@@ -85,7 +85,8 @@ On load the Output tab logs:
 | BFLA | API5:2023 | privileged query reachable by low-priv identity (read-only) |
 | Verbose errors | API8:2023 | stack-trace / SQL / framework leakage |
 | Injection insertion points | (A03 Injection) | schema-static seeder for sqlmap/nuclei (String/ID + custom scalars) |
-| Active in-band injection (per operation) | API8:2023 / A03 | during **Scan selected**, every injectable leaf of each selected op — String/ID/custom scalars, **including fields nested inside input-object args** (`event.profileId`): `'` → backend SQL/NoSQL error (baseline-subtracted), `${7*7}` → evaluated to `49` (SSTI) |
+| Active in-band injection (per operation) | API8:2023 / A03 | during **Scan selected**, every injectable leaf of each selected op (String/ID/custom scalars, **incl. fields nested in input-object args**): SQLi/NoSQLi error-based, multi-engine SSTI (`7*191`→`1337`), path-traversal read, **time-based** & **boolean-based** blind SQLi |
+| Confirmed SSRF / OOB (per operation) | API7:2023 / A03 | during **Scan selected**, a Burp Collaborator URL in each injectable leaf (incl. nested + mutations); a real out-of-band interaction ⇒ confirmed SSRF (url-named arg) or blind dereference |
 | SSRF candidate arguments | API7:2023 | schema-static seeder (url/webhook/callback args) + Collaborator scaffold |
 | GraphQL IDE exposed in prod | API8:2023 | GET detects GraphiQL/Playground/Altair |
 | Content-Type CORS bypass | API8:2023 | `{__typename}` as `text/plain` (simple request, no preflight) |
@@ -99,8 +100,6 @@ On load the Output tab logs:
 | Fragment-cycle detection | API4:2023 | self-spreading fragment accepted (missing cycle guard) |
 | Unbounded pagination | API4:2023 | `first/limit:1000000` accepted with no cap |
 | Field duplication | API4:2023 | field repeated ×10 accepted (proof-capped) |
-| Confirmed SSRF (OOB) | API7:2023 | Collaborator URL in a URL-arg fires out-of-band |
-| OOB canary injection | API7:2023 | Collaborator URL in any string arg fires out-of-band |
 | IDOR / object enumeration | API1:2023 | adjacent ids both resolve to distinct objects |
 | Auth brute-force amplification | API2:2023 | schema-static: batchable auth operations (rate-limit bypass) |
 | CORS misconfiguration | API8:2023 | reflected Origin + credentials (credentialed cross-origin read) |
@@ -111,13 +110,13 @@ On load the Output tab logs:
 
 ## Active out-of-band checks (Burp Collaborator)
 
-The SSRF/OOB checks (`active-ssrf`, `oob-canary-injection`) confirm findings via Burp
-Collaborator: they inject a unique Collaborator URL into read-only root-query string
-arguments and report only those that produce a real out-of-band interaction. They
-**no-op unless Collaborator is available**, target query-root fields only (never fire a
-mutation), use canary URLs only (non-destructive), and poll briefly for interactions —
-so an Enumerate run with Collaborator enabled takes a little longer. This confirmation
-step is the extension's key differentiator over static GraphQL scanners.
+OOB confirmation runs **per operation during Scan selected**, over the same injectable leaves
+as in-band injection (String/ID/custom scalars, **including fields nested in input-object args**,
+on queries and the mutations you ticked). A unique Collaborator URL is placed in each leaf; a real
+out-of-band interaction ⇒ **confirmed SSRF** (`op-ssrf-confirmed`) for a url-named field, else a
+**confirmed blind dereference** (`op-oob-confirmed`). Payloads are canary URLs only
+(non-destructive) and the pass **no-ops unless Collaborator is available**. Observed, not inferred —
+the extension's key differentiator over static GraphQL scanners.
 
 ## Active in-band injection (no Collaborator)
 

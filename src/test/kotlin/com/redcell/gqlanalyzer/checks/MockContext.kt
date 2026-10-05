@@ -38,6 +38,12 @@ object MockContext {
         responses: List<HttpRequestResponse>,
         config: CheckConfig = CheckConfig(),
         schema: SchemaModel? = null,
+        /**
+         * Optional body-conditional responder: given the request body just sent, return a
+         * response to use, or null to fall back to the positional [responses] list. Lets
+         * injection tests key a response to the payload it carries instead of send position.
+         */
+        responder: ((String) -> HttpRequestResponse?)? = null,
     ): Pair<CheckContext, Sent> {
         val sent = Sent()
         val base = mockk<HttpRequest>()
@@ -56,7 +62,8 @@ object MockContext {
         var i = 0
         every { http.sendRequest(any<HttpRequest>()) } answers {
             sent.requests.add(firstArg())
-            responses[i.coerceAtMost(responses.size - 1)].also { i++ }
+            val custom = responder?.invoke(sent.bodies.lastOrNull() ?: "")
+            custom ?: responses[i.coerceAtMost(responses.size - 1)].also { i++ }
         }
 
         val api = mockk<MontoyaApi>()

@@ -1,8 +1,7 @@
 package com.redcell.gqlanalyzer.checks
 
-import burp.api.montoya.MontoyaApi
-import com.redcell.gqlanalyzer.checks.impl.ActiveSsrfCheck
-import com.redcell.gqlanalyzer.checks.impl.OobCanaryInjectionCheck
+import com.redcell.gqlanalyzer.engine.OperationEnumerator
+import com.redcell.gqlanalyzer.engine.OperationScanner
 import com.redcell.gqlanalyzer.schema.GqlField
 import com.redcell.gqlanalyzer.schema.GqlInputValue
 import com.redcell.gqlanalyzer.schema.GqlType
@@ -14,10 +13,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+/**
+ * OOB/Collaborator confirmation, now driven by the per-operation scan (v0.16.0) rather than the
+ * old endpoint checks. Uses a fake collaborator so no Montoya runtime is needed.
+ */
 class Phase8ChecksTest {
 
     private fun rsp(status: Int, body: String) = MockContext.mockResponse(status, body)
-
     private val str = GqlTypeRef(kind = "SCALAR", name = "String")
 
     /** Query { fetch(url: String): String, note(text: String): String } */
@@ -32,7 +34,7 @@ class Phase8ChecksTest {
         return SchemaModel("Query", null, null, listOf(query))
     }
 
-    /** Fake OOB client: mints incrementing ids; [firedIndices] decide which payloads "fire". */
+    /** Fake OOB client: mints incrementing payloads; [fireFirst] fires only the first minted id. */
     private class FakeOob(val availableFlag: Boolean, val fireFirst: Boolean) : OobClient {
         val generated = mutableListOf<OobPayload>()
         override fun available() = availableFlag
@@ -45,43 +47,46 @@ class Phase8ChecksTest {
             if (fireFirst && generated.isNotEmpty()) setOf(generated.first().id) else emptySet()
     }
 
+    private fun scanner(fake: FakeOob) =
+        OperationScanner(oobFactory = { _ -> fake }, pollAttempts = 1, pollDelayMs = 0)
+
+    private fun ops(s: SchemaModel) = OperationEnumerator.enumerate(s).associateBy { it.name }
+
     @Test
-    fun `active ssrf confirms when the url-arg payload fires`() {
+    fun `confirmed SSRF on a url-named leaf when its OOB payload fires`() {
+        val s = schema()
         val fake = FakeOob(availableFlag = true, fireFirst = true)
-        val (ctx, sent) = MockContext.build(listOf(rsp(200, """{"data":{"fetch":"ok"}}""")), schema = schema())
-        val check = ActiveSsrfCheck(oobFactory = { _: MontoyaApi -> fake }, pollAttempts = 1, pollDelayMs = 0)
-        val f = check.run(ctx)
-        assertEquals(1, f.size)
-        assertTrue(f[0].name.contains("fetch"))
-        // the SSRF-named 'url' arg was injected with a collaborator URL
+        val (ctx, sent) = MockContext.build(listOf(rsp(200, """{"data":{"fetch":"ok"}}""")), schema = s)
+
+        // Scan fetch first so its url leaf mints the first (firing) payload.
+        val r = scanner(fake).scan(ctx, listOf(ops(s)["QUERY.fetch"]!!, ops(s)["QUERY.note"]!!))
+
+        val f = r.findings.single { it.checkId == "op-ssrf-confirmed" }
+        assertTrue(f.name.contains("fetch"))
+        assertTrue(f.location.endsWith("(url)"))
         assertTrue(sent.bodies.any { it.contains("http://h0.oast.example/") })
     }
 
     @Test
-    fun `active ssrf silent when no interaction fires`() {
-        val fake = FakeOob(availableFlag = true, fireFirst = false)
-        val (ctx, _) = MockContext.build(listOf(rsp(200, """{"data":{"fetch":"ok"}}""")), schema = schema())
-        val check = ActiveSsrfCheck(oobFactory = { _: MontoyaApi -> fake }, pollAttempts = 1, pollDelayMs = 0)
-        assertTrue(check.run(ctx).isEmpty())
-    }
-
-    @Test
-    fun `active ssrf skipped when collaborator unavailable`() {
-        val fake = FakeOob(availableFlag = false, fireFirst = true)
-        val (ctx, sent) = MockContext.build(listOf(rsp(200, "{}")), schema = schema())
-        val check = ActiveSsrfCheck(oobFactory = { _: MontoyaApi -> fake }, pollAttempts = 1, pollDelayMs = 0)
-        assertTrue(check.run(ctx).isEmpty())
-        assertTrue(sent.requests.isEmpty())
-    }
-
-    @Test
-    fun `oob canary targets non-ssrf string args and confirms on fire`() {
+    fun `confirmed generic OOB on a non-url leaf`() {
+        val s = schema()
         val fake = FakeOob(availableFlag = true, fireFirst = true)
-        val (ctx, sent) = MockContext.build(listOf(rsp(200, """{"data":{"note":"ok"}}""")), schema = schema())
-        val check = OobCanaryInjectionCheck(oobFactory = { _: MontoyaApi -> fake }, pollAttempts = 1, pollDelayMs = 0)
-        val f = check.run(ctx)
-        assertEquals(1, f.size)
-        assertTrue(f[0].name.contains("note")) // 'url' excluded (owned by ActiveSsrfCheck)
-        assertTrue(sent.bodies.any { it.contains("text:") && it.contains("oast.example") })
+        val (ctx, _) = MockContext.build(listOf(rsp(200, """{"data":{"note":"ok"}}""")), schema = s)
+
+        val r = scanner(fake).scan(ctx, listOf(ops(s)["QUERY.note"]!!))
+        val f = r.findings.single { it.checkId == "op-oob-confirmed" }
+        assertTrue(f.name.contains("note"))
+        assertTrue(f.location.endsWith("(text)"))
+    }
+
+    @Test
+    fun `no OOB findings and no collaborator payloads when unavailable`() {
+        val s = schema()
+        val fake = FakeOob(availableFlag = false, fireFirst = true)
+        val (ctx, sent) = MockContext.build(listOf(rsp(200, "{}")), schema = s)
+
+        val r = scanner(fake).scan(ctx, listOf(ops(s)["QUERY.fetch"]!!))
+        assertTrue(r.findings.none { it.checkId == "op-ssrf-confirmed" || it.checkId == "op-oob-confirmed" })
+        assertTrue(sent.bodies.none { it.contains("oast.example") }) // no OOB payload sent
     }
 }

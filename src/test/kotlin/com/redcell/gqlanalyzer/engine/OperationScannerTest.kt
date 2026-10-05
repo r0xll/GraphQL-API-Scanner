@@ -10,6 +10,7 @@ import com.redcell.gqlanalyzer.schema.GqlInputValue
 import com.redcell.gqlanalyzer.schema.GqlType
 import com.redcell.gqlanalyzer.schema.GqlTypeRef
 import com.redcell.gqlanalyzer.schema.SchemaModel
+import com.redcell.gqlanalyzer.transport.InjectionPayloads
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -58,9 +59,8 @@ class OperationScannerTest {
         val r = OperationScanner().scan(ctx, listOf(ops["QUERY.user"]!!))
 
         assertTrue(r.findings.any { it.checkId == "op-bola" })
-        // primary + identity A + identity B, then the injection pass on the injectable `id` arg
-        // (quote + SSTI) — all clean here, so no injection findings.
-        assertEquals(5, sent.requests.size)
+        // primary + identity A + identity B, then the injection catalog on the injectable `id` leaf.
+        assertEquals(3 + InjectionPayloads.inBand.size, sent.requests.size)
     }
 
     @Test
@@ -117,8 +117,11 @@ class OperationScannerTest {
         val s = customScalarSchema()
         val op = OperationEnumerator.enumerate(s).first { it.name == "QUERY.product" }
         val sqlErr = """{"errors":[{"message":"ERROR: syntax error at or near \"'\""}]}"""
-        // baseline (resolved), quote (SQL error), ssti (clean)
-        val (ctx, _) = MockContext.build(listOf(rsp(RESOLVED_PRODUCT), rsp(sqlErr), rsp(RESOLVED_PRODUCT)), schema = s)
+        // Any payload carrying a quote breaker → SQL error; the clean baseline (serial:"test") → positional.
+        val (ctx, _) = MockContext.build(
+            listOf(rsp(RESOLVED_PRODUCT)), schema = s,
+            responder = { body -> if (body.contains("'")) rsp(sqlErr) else null },
+        )
 
         val r = OperationScanner().scan(ctx, listOf(op))
         val f = r.findings.single { it.checkId == "op-injection-error" }
@@ -131,9 +134,12 @@ class OperationScannerTest {
     fun `ssti injection fires when the arithmetic payload is evaluated`() {
         val s = customScalarSchema()
         val op = OperationEnumerator.enumerate(s).first { it.name == "QUERY.product" }
-        val evaluated = """{"data":{"product":"49"}}"""
-        // baseline (resolved, no 49), quote (clean), ssti (49)
-        val (ctx, _) = MockContext.build(listOf(rsp(RESOLVED_PRODUCT), rsp(RESOLVED_PRODUCT), rsp(evaluated)), schema = s)
+        val evaluated = """{"data":{"product":"1337"}}"""
+        // EVAL payloads compute 7*191; only those (containing "191") come back evaluated.
+        val (ctx, _) = MockContext.build(
+            listOf(rsp(RESOLVED_PRODUCT)), schema = s,
+            responder = { body -> if (body.contains("191")) rsp(evaluated) else null },
+        )
 
         val r = OperationScanner().scan(ctx, listOf(op))
         assertEquals(1, r.findings.count { it.checkId == "op-injection-ssti" })
@@ -141,10 +147,46 @@ class OperationScannerTest {
     }
 
     @Test
+    fun `path-traversal read fires on an etc-passwd marker`() {
+        val s = customScalarSchema()
+        val op = OperationEnumerator.enumerate(s).first { it.name == "QUERY.product" }
+        val passwd = """{"data":{"product":"root:x:0:0:root:/root:/bin/bash"}}"""
+        val (ctx, _) = MockContext.build(
+            listOf(rsp(RESOLVED_PRODUCT)), schema = s,
+            responder = { body -> if (body.contains("etc/passwd")) rsp(passwd) else null },
+        )
+
+        val r = OperationScanner().scan(ctx, listOf(op))
+        val f = r.findings.single { it.checkId == "op-injection-file" }
+        assertEquals("Query.product", f.affectedOperation)
+    }
+
+    @Test
+    fun `boolean-based blind fires on a true-false differential`() {
+        val s = customScalarSchema()
+        val op = OperationEnumerator.enumerate(s).first { it.name == "QUERY.product" }
+        val data = """{"data":{"product":{"__typename":"Product"}}}"""
+        val empty = """{"data":null}"""
+        val (ctx, _) = MockContext.build(
+            listOf(rsp(RESOLVED_PRODUCT)), schema = s,
+            responder = { body ->
+                when {
+                    body.contains("'1'='1") -> rsp(data)  // TRUE tautology returns data
+                    body.contains("'1'='2") -> rsp(empty) // FALSE contradiction returns nothing
+                    else -> null
+                }
+            },
+        )
+
+        val r = OperationScanner().scan(ctx, listOf(op))
+        assertEquals(1, r.findings.count { it.checkId == "op-injection-boolean" })
+    }
+
+    @Test
     fun `clean operation yields no injection findings`() {
         val s = customScalarSchema()
         val op = OperationEnumerator.enumerate(s).first { it.name == "QUERY.product" }
-        val (ctx, _) = MockContext.build(listOf(rsp(RESOLVED_PRODUCT)), schema = s) // repeats
+        val (ctx, _) = MockContext.build(listOf(rsp(RESOLVED_PRODUCT)), schema = s) // repeats clean
         val r = OperationScanner().scan(ctx, listOf(op))
         assertTrue(r.findings.none { it.checkId.startsWith("op-injection") })
     }
@@ -158,12 +200,14 @@ class OperationScannerTest {
         val s = SchemaModel("Query", "Mutation", null, listOf(GqlType("Query", "OBJECT"), mutation))
         val op = OperationEnumerator.enumerate(s).first { it.name == "MUTATION.updateTag" }
         val sqlErr = """{"errors":[{"message":"You have an error in your SQL syntax"}]}"""
-        // baseline (resolved bool), quote (SQL error), ssti (clean)
-        val (ctx, sent) = MockContext.build(listOf(rsp("""{"data":{"updateTag":true}}"""), rsp(sqlErr), rsp("""{"data":{"updateTag":true}}""")), schema = s)
+        val (ctx, sent) = MockContext.build(
+            listOf(rsp("""{"data":{"updateTag":true}}""")), schema = s,
+            responder = { body -> if (body.contains("'")) rsp(sqlErr) else null },
+        )
 
         val r = OperationScanner().scan(ctx, listOf(op))
         assertEquals("Mutation.updateTag", r.findings.single { it.checkId == "op-injection-error" }.affectedOperation)
-        assertTrue(sent.requests.size >= 2) // baseline + at least the quote payload were sent
+        assertTrue(sent.requests.size >= 2) // baseline + at least one injection payload were sent
     }
 
     @Test
@@ -176,8 +220,8 @@ class OperationScannerTest {
 
         val r = OperationScanner().scan(ctx, listOf(op))
         assertEquals(OperationStatus.INVALID_INPUT, r.statuses[op])
-        // 1 adaptive probe + quote + ssti on `serial` — the operator sees the attempts in Logger.
-        assertEquals(3, sent.requests.size)
+        // 1 adaptive probe + the full catalog on `serial` — the operator sees the attempts in Logger.
+        assertEquals(1 + InjectionPayloads.inBand.size, sent.requests.size)
         // A coercion error is not an injection signature, so nothing is (falsely) reported.
         assertTrue(r.findings.none { it.checkId.startsWith("op-injection") })
     }
@@ -198,8 +242,8 @@ class OperationScannerTest {
         val (ctx, sent) = MockContext.build(listOf(rsp("""{"data":{"multi":true}}""")), schema = s) // repeats clean
 
         OperationScanner(maxInjectionPoints = 2).scan(ctx, listOf(op))
-        // 1 adaptive baseline + 2 points × 2 payloads (quote + ssti) = 5; the 3rd arg is never injected.
-        assertEquals(5, sent.requests.size)
+        // 1 adaptive baseline + 2 capped leaves × the full catalog; the 3rd arg is never injected.
+        assertEquals(1 + 2 * InjectionPayloads.inBand.size, sent.requests.size)
     }
 
     @Test
@@ -223,26 +267,20 @@ class OperationScannerTest {
         val s = SchemaModel("Query", "Mutation", null, listOf(GqlType("Query", "OBJECT"), mutation, input, cat, GqlType("DateTime", "SCALAR")))
         val op = OperationEnumerator.enumerate(s).first { it.name == "MUTATION.evt" }
 
-        // Injectable leaves (required, string-backed): event.id, event.profileId, event.timestamp.
-        // Sends: baseline(1), then per leaf quote+ssti in order id, profileId, timestamp.
-        // Make the profileId quote (4th send, index 3) return a SQL error.
+        // Fire a SQL error only for the quote payload landing in event.profileId (siblings stay valid).
         val clean = """{"data":{"evt":true}}"""
         val sqlErr = """{"errors":[{"message":"ERROR: syntax error at or near \"'\""}]}"""
         val (ctx, sent) = MockContext.build(
-            listOf(rsp(clean), rsp(clean), rsp(clean), rsp(sqlErr), rsp(clean), rsp(clean), rsp(clean)),
-            schema = s,
+            listOf(rsp(clean)), schema = s,
+            responder = { body -> if (body.contains("""profileId: \"'\"""")) rsp(sqlErr) else null },
         )
 
         val r = OperationScanner().scan(ctx, listOf(op))
         val f = r.findings.single { it.checkId == "op-injection-error" }
         assertTrue(f.name.contains("event.profileId"))
         assertEquals("Mutation.evt", f.affectedOperation)
-        // The profileId-quote request carried the payload in that field, with siblings kept valid.
-        // Bodies are JSON envelopes, so the doc's inner quotes are backslash-escaped (`"` -> \").
-        val profileIdQuote = sent.bodies[3]
-        assertTrue(profileIdQuote.contains("""profileId: \"'\""""))   // payload placed at the nested field
-        assertTrue(profileIdQuote.contains("timestamp:"))             // sibling present & valid
-        assertTrue(profileIdQuote.contains("id:"))                    // sibling present & valid
+        // The firing request carried the payload at the nested field with siblings kept valid.
+        assertTrue(sent.bodies.any { it.contains("""profileId: \"'\"""") && it.contains("timestamp:") && it.contains("id:") })
     }
 
     @Test

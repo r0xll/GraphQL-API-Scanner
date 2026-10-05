@@ -22,9 +22,29 @@ class HeuristicsInjectionTest {
     }
 
     @Test
-    fun `evaluatedExpression detects template evaluation`() {
-        assertTrue(Heuristics.evaluatedExpression("""{"data":{"item":"49 results"}}"""))
+    fun `evaluatedExpression detects template evaluation (1337 = 7 times 191)`() {
+        assertTrue(Heuristics.evaluatedExpression("""{"data":{"item":"1337 results"}}"""))
         assertFalse(Heuristics.evaluatedExpression(CLEAN))
+    }
+
+    @Test
+    fun `fileReadSignatures detects passwd and win-ini markers`() {
+        assertTrue(Heuristics.fileReadSignatures("""{"data":{"x":"root:x:0:0:root:/root:/bin/bash"}}""").isNotEmpty())
+        assertTrue(Heuristics.fileReadSignatures("; for 16-bit app support\n[fonts]").isNotEmpty())
+        assertTrue(Heuristics.fileReadSignatures(CLEAN).isEmpty())
+    }
+
+    @Test
+    fun `timeBlindFired only when the latency jump clears the threshold`() {
+        assertTrue(Heuristics.timeBlindFired(baselineMs = 120, payloadMs = 5200)) // ~5s sleep
+        assertFalse(Heuristics.timeBlindFired(baselineMs = 120, payloadMs = 300)) // normal jitter
+    }
+
+    @Test
+    fun `booleanBlindDiffers on a data-vs-empty or error differential`() {
+        assertTrue(Heuristics.booleanBlindDiffers("""{"data":{"x":1}}""", """{"data":null}"""))
+        assertTrue(Heuristics.booleanBlindDiffers("""{"data":{"x":1}}""", """{"errors":[{"message":"boom"}]}"""))
+        assertFalse(Heuristics.booleanBlindDiffers("""{"data":{"x":1}}""", """{"data":{"x":1}}"""))
     }
 
     // ---- isInjectableScalar / injectionInsertionPoints broadening ----

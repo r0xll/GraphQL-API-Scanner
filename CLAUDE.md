@@ -27,6 +27,11 @@ is committed, pushed, and the build is green:
 
 - Proof-level only: no check sends > 10 batched/aliased ops, recurses depth as an
   attack, or writes privileged state.
+- Blind SQLi is permitted **only under the explicit Scan selected gate**: a single short
+  time delay (one ~5s sleep per dialect) and a boolean true/false differential that reports
+  only the differential (never dumped data). Never stacked or destructive SQL, never OS
+  command execution, and never a write beyond the operator-selected operation. OOB payloads
+  stay canary-only (hostnames/URLs, no state change).
 - Mutations/subscriptions are executed only via the explicit **Scan selected** action
   after the operator reviews the Operations grid. Operations default to selected, so
   the write-safety gate is the operator deselecting what they don't want (and the
