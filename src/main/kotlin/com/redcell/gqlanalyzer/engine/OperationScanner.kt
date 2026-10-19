@@ -64,6 +64,10 @@ class OperationScanner(
         val oobMeta = LinkedHashMap<String, OobTargetMeta>()
 
         for (op in operations) {
+            // Cooperative cancellation: an extension unload interrupts this worker (shutdownNow);
+            // stop between operations and return the partial result rather than firing the rest.
+            if (Thread.currentThread().isInterrupted) break
+
             val sensitive = if (schema != null) sensitiveLeaves(schema, op) else emptyList()
             val probe = adaptiveProbe(ctx, schema, op, sensitive)
             probes[op] = OpProbe(probe.rr, probe.body)

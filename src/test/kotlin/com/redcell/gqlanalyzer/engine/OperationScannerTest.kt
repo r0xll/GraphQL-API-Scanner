@@ -284,6 +284,21 @@ class OperationScannerTest {
     }
 
     @Test
+    fun `scan stops early and sends nothing when the worker thread is interrupted`() {
+        val s = customScalarSchema()
+        val op = OperationEnumerator.enumerate(s).first { it.name == "QUERY.product" }
+        val (ctx, sent) = MockContext.build(listOf(rsp(RESOLVED_PRODUCT)), schema = s)
+
+        Thread.currentThread().interrupt() // simulate an unload interrupt on the scan worker
+        val r = OperationScanner().scan(ctx, listOf(op))
+        val wasInterrupted = Thread.interrupted() // read-and-clear so later tests are unaffected
+
+        assertTrue(wasInterrupted)
+        assertTrue(r.statuses.isEmpty())     // broke before processing any operation
+        assertTrue(sent.requests.isEmpty())  // no requests sent
+    }
+
+    @Test
     fun `scoreOperation matches a full scan for the same response`() {
         val body = """{"data":{"adminUsers":{"__typename":"User"}}}"""
         val op = ops["QUERY.adminUsers"]!!

@@ -3,6 +3,7 @@ package com.redcell.gqlanalyzer.ui
 import burp.api.montoya.MontoyaApi
 import burp.api.montoya.http.message.requests.HttpRequest
 import com.redcell.gqlanalyzer.engine.AnalyzerService
+import com.redcell.gqlanalyzer.engine.Workers
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.FlowLayout
@@ -22,6 +23,7 @@ import javax.swing.SwingUtilities
  */
 class AnalyzerTab(
     private val api: MontoyaApi,
+    private val workers: Workers,
     private val service: AnalyzerService = AnalyzerService(api),
 ) {
     private val tabs = JTabbedPane()
@@ -58,7 +60,7 @@ class AnalyzerTab(
      */
     fun addTarget(request: HttpRequest) {
         val n = counter.incrementAndGet()
-        val panel = TargetPanel(api, request, service)
+        val panel = TargetPanel(api, request, service, workers)
         val content = panel.component
         val title = "#$n ${hostOf(request)}"
         targets.add(content)

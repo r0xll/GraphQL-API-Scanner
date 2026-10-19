@@ -4,6 +4,7 @@ import burp.api.montoya.MontoyaApi
 import burp.api.montoya.http.message.requests.HttpRequest
 import com.redcell.gqlanalyzer.engine.AnalyzerService
 import com.redcell.gqlanalyzer.engine.OperationScanner
+import com.redcell.gqlanalyzer.engine.Workers
 import com.redcell.gqlanalyzer.model.CheckConfig
 import com.redcell.gqlanalyzer.model.Finding
 import com.redcell.gqlanalyzer.model.Operation
@@ -42,6 +43,7 @@ class TargetPanel(
     private val api: MontoyaApi,
     private val base: HttpRequest,
     private val service: AnalyzerService,
+    private val workers: Workers,
 ) {
     @Volatile private var schema: SchemaModel? = null
     @Volatile private var lastScan: OperationScanner.ScanResult? = null
@@ -181,13 +183,14 @@ class TargetPanel(
         OperationEditorDialog(
             api = api,
             service = service,
+            workers = workers,
             op = op,
             schema = schema,
             config = config,
             seedRequest = seedRequest,
             seedResponse = seedResponse,
             onApply = { status, newFindings -> applyRetest(op, status, newFindings) },
-        ).show(component)
+        ).show(ownerWindow())
     }
 
     /** The request the scanner would send for [op] (used when it was never scanned). */
@@ -243,7 +246,7 @@ class TargetPanel(
     /** Load an operator-supplied schema file (introspection JSON or SDL) instead of introspecting. */
     fun loadSchemaFile() {
         val chooser = JFileChooser().apply { dialogTitle = "Load GraphQL schema / introspection file" }
-        if (chooser.showOpenDialog(component) != JFileChooser.APPROVE_OPTION) return
+        if (chooser.showOpenDialog(ownerWindow() ?: component) != JFileChooser.APPROVE_OPTION) return
         val file = chooser.selectedFile ?: return
         val text = runCatching { file.readText() }.getOrElse {
             statusLabel.text = "Could not read file: ${it.message}"
@@ -323,6 +326,11 @@ class TargetPanel(
         }
 
     private fun runOffEdt(name: String, block: () -> Unit) {
-        Thread(block, name).apply { isDaemon = true }.start()
+        workers.submit(api, name, block)
     }
+
+    /** The Burp suite frame, used to parent dialogs so they land on the right monitor (rule 8). */
+    private fun ownerWindow(): java.awt.Window? =
+        runCatching { api.userInterface().swingUtils().suiteFrame() }.getOrNull()
+            ?: SwingUtilities.getWindowAncestor(component)
 }

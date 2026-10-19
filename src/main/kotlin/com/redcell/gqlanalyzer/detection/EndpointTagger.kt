@@ -14,8 +14,12 @@ import burp.api.montoya.http.handler.ResponseReceivedAction
  */
 class EndpointTagger(private val api: MontoyaApi) : HttpHandler {
 
-    /** URLs already tagged, so the extension log stays quiet on repeats. */
+    /** URLs already tagged, so the extension log stays quiet on repeats (bounded, see [SEEN_CAP]). */
     private val seen = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    private companion object {
+        const val SEEN_CAP = 5000
+    }
 
     override fun handleHttpRequestToBeSent(request: HttpRequestToBeSent): RequestToBeSentAction =
         RequestToBeSentAction.continueWith(request)
@@ -30,6 +34,8 @@ class EndpointTagger(private val api: MontoyaApi) : HttpHandler {
         if (!detection.isGraphQL) return ResponseReceivedAction.continueWith(response)
 
         val url = runCatching { request.url() }.getOrDefault(request.path())
+        // Bound the de-dupe set so a very long session can't grow it without limit (rule 7).
+        if (seen.size > SEEN_CAP) seen.clear()
         if (seen.add(url)) {
             api.logging().logToOutput("GraphQL endpoint detected: $url — ${detection.reasons.joinToString("; ")}")
         }

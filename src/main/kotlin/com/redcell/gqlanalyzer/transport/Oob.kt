@@ -64,7 +64,13 @@ class OobScanner(
             hits = oob.firedIds().intersect(wanted)
             if (hits.size == wanted.size) return@repeat
             if (attempt < pollAttempts - 1 && pollDelayMs > 0) {
-                runCatching { Thread.sleep(pollDelayMs) }
+                try {
+                    Thread.sleep(pollDelayMs)
+                } catch (e: InterruptedException) {
+                    // Extension unload / cancellation: restore the flag and stop waiting now.
+                    Thread.currentThread().interrupt()
+                    return hits.associate { idToLabel[it]!! to idToEvidence[it]!! }
+                }
             }
         }
         hits = oob.firedIds().intersect(wanted)

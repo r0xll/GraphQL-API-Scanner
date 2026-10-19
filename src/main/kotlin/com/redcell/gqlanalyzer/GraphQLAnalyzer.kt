@@ -4,6 +4,7 @@ import burp.api.montoya.BurpExtension
 import burp.api.montoya.MontoyaApi
 import com.redcell.gqlanalyzer.detection.EndpointTagger
 import burp.api.montoya.scanner.scancheck.ScanCheckType
+import com.redcell.gqlanalyzer.engine.Workers
 import com.redcell.gqlanalyzer.scanner.GraphQLScanCheck
 import com.redcell.gqlanalyzer.ui.AnalyzerTab
 import com.redcell.gqlanalyzer.ui.GraphQLContextMenu
@@ -20,11 +21,15 @@ class GraphQLAnalyzer : BurpExtension {
     override fun initialize(api: MontoyaApi) {
         api.extension().setName(EXTENSION_NAME)
 
+        // Owns all background threads so they terminate on unload (BApp rule 4).
+        val workers = Workers()
+        api.extension().registerUnloadingHandler { workers.shutdown() }
+
         // Passive GraphQL fingerprinting on all proxied traffic.
         api.http().registerHttpHandler(EndpointTagger(api))
 
         // Analyzer UI + right-click driver.
-        val tab = AnalyzerTab(api)
+        val tab = AnalyzerTab(api, workers)
         api.userInterface().registerSuiteTab(EXTENSION_NAME, tab.component)
         api.userInterface().registerContextMenuItemsProvider(GraphQLContextMenu(api, tab))
 
@@ -36,6 +41,6 @@ class GraphQLAnalyzer : BurpExtension {
 
     companion object {
         const val EXTENSION_NAME = "GraphQL OWASP-API Analyzer"
-        const val VERSION = "0.16.0"
+        const val VERSION = "0.16.1"
     }
 }

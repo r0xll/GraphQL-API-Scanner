@@ -3,6 +3,7 @@ package com.redcell.gqlanalyzer.ui
 import burp.api.montoya.MontoyaApi
 import burp.api.montoya.http.message.requests.HttpRequest
 import com.redcell.gqlanalyzer.checks.SchemaFixtures
+import com.redcell.gqlanalyzer.engine.Workers
 import io.mockk.every
 import io.mockk.mockk
 import javax.swing.tree.DefaultMutableTreeNode
@@ -16,7 +17,7 @@ class AnalyzerTabTest {
     fun `addTarget retains a tab per request instead of overwriting`() {
         System.setProperty("java.awt.headless", "true")
         val api = mockk<MontoyaApi>(relaxed = true)
-        val tab = AnalyzerTab(api)
+        val tab = AnalyzerTab(api, Workers())
 
         val req1 = mockk<HttpRequest>(relaxed = true)
         every { req1.url() } returns "https://a.example/graphql"

@@ -5,13 +5,13 @@ import burp.api.montoya.http.message.requests.HttpRequest
 import burp.api.montoya.http.message.responses.HttpResponse
 import burp.api.montoya.ui.editor.EditorOptions
 import com.redcell.gqlanalyzer.engine.AnalyzerService
+import com.redcell.gqlanalyzer.engine.Workers
 import com.redcell.gqlanalyzer.model.CheckConfig
 import com.redcell.gqlanalyzer.model.Finding
 import com.redcell.gqlanalyzer.model.Operation
 import com.redcell.gqlanalyzer.model.OperationStatus
 import com.redcell.gqlanalyzer.schema.SchemaModel
 import java.awt.BorderLayout
-import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
 import javax.swing.BorderFactory
@@ -36,6 +36,7 @@ import javax.swing.SwingUtilities
 class OperationEditorDialog(
     private val api: MontoyaApi,
     private val service: AnalyzerService,
+    private val workers: Workers,
     private val op: Operation,
     private val schema: SchemaModel?,
     private val config: CheckConfig,
@@ -59,9 +60,8 @@ class OperationEditorDialog(
         seedResponse?.let { responseEditor.setResponse(it) }
     }
 
-    /** Build and show the modal dialog, owned by [parent]'s window. */
-    fun show(parent: Component) {
-        val owner = SwingUtilities.getWindowAncestor(parent)
+    /** Build and show the modeless dialog, owned by the Burp suite frame ([owner]). */
+    fun show(owner: java.awt.Window?) {
         val dialog = JDialog(owner, "Edit & re-test: ${op.parentTypeName}.${op.field.name}", java.awt.Dialog.ModalityType.MODELESS)
         dialog.contentPane = buildContent()
         dialog.minimumSize = Dimension(720, 520)
@@ -114,7 +114,7 @@ class OperationEditorDialog(
         val edited = requestEditor.request
         sendButton.isEnabled = false
         statusLabel.text = "Sending…"
-        Thread({
+        workers.submit(api, "gql-op-retest") {
             val res = runCatching { service.rerunOperation(edited, config, schema, op) }
             SwingUtilities.invokeLater {
                 sendButton.isEnabled = true
@@ -127,6 +127,6 @@ class OperationEditorDialog(
                         statusLabel.text = "Status: ${r.status.name} — ${r.findings.size} finding(s). Apply to push to the grid."
                     }
             }
-        }, "gql-op-retest").apply { isDaemon = true }.start()
+        }
     }
 }
