@@ -148,3 +148,7 @@ to confirm and exploit a hit.
 
 Kotlin 2.1 (JDK 21), Gradle Kotlin DSL, Montoya API 2025.8, kotlinx.serialization,
 JUnit5 + MockK. Package root: `com.redcell.gqlanalyzer`.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
