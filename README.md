@@ -149,6 +149,16 @@ to confirm and exploit a hit.
 Kotlin 2.1 (JDK 21), Gradle Kotlin DSL, Montoya API 2025.8, kotlinx.serialization,
 JUnit5 + MockK. Package root: `com.redcell.gqlanalyzer`.
 
+## Editions
+
+Works in **Burp Suite Community and Professional**. The active, HTTP-driven workflow — the tab,
+Enumerate, Scan selected (all endpoint + per-operation checks, including injection), the operation
+editor, and proxy-traffic highlighting — runs on **Community**. Three features need **Professional**:
+the passive "GraphQL endpoint detected" scan issue, findings mirrored into the site-map **Issues**
+view, and **Collaborator** OOB confirmation (`op-ssrf-confirmed`/`op-oob-confirmed`). On Community
+these are skipped cleanly (findings still appear in the tab's Findings grid); the edition is detected
+at load and logged.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).

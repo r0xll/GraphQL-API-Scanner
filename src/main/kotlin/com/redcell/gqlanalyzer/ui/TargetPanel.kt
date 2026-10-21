@@ -210,9 +210,18 @@ class TargetPanel(
         if (newFindings.isNotEmpty()) {
             findings.addAll(newFindings)
             findingsModel.setFindings(findings.toList())
-            newFindings.forEach { api.siteMap().add(FindingAuditIssue.toAuditIssue(it)) }
+            addToSiteMap(newFindings)
         }
         statusLabel.text = "Re-tested ${op.parentTypeName}.${op.field.name}: ${status.name}, ${newFindings.size} finding(s)."
+    }
+
+    /**
+     * Publish findings as Burp site-map AuditIssues. Scanner/Issues is Professional-only, so on
+     * Community `siteMap().add` may be inert or throw — guard each so findings never break the UI
+     * (they always remain visible in the Findings grid regardless of edition).
+     */
+    private fun addToSiteMap(findings: List<Finding>) {
+        findings.forEach { runCatching { api.siteMap().add(FindingAuditIssue.toAuditIssue(it)) } }
     }
 
     private fun targetLabel(): String = runCatching { base.url() }.getOrDefault(base.path())
@@ -280,7 +289,7 @@ class TargetPanel(
         findings.clear()
         findings.addAll(r.endpointFindings)
         findingsModel.setFindings(findings.toList())
-        r.endpointFindings.forEach { api.siteMap().add(FindingAuditIssue.toAuditIssue(it)) }
+        addToSiteMap(r.endpointFindings)
         scanButton.isEnabled = r.operations.isNotEmpty()
         statusLabel.text = "${r.operations.size} operation(s); ${r.endpointFindings.size} endpoint finding(s); schema source: $source."
     }
@@ -307,7 +316,7 @@ class TargetPanel(
                         lastScan = r
                         findings.addAll(r.findings)
                         findingsModel.setFindings(findings.toList())
-                        r.findings.forEach { api.siteMap().add(FindingAuditIssue.toAuditIssue(it)) }
+                        addToSiteMap(r.findings)
                         val perOp = countPerOperation(selected, r.findings)
                         operationsModel.applyStatuses(r.statuses, perOp)
                         statusLabel.text = "Scanned ${selected.size}; ${r.findings.size} new finding(s). Issues added to site map."
